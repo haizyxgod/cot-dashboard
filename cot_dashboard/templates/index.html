@@ -95,6 +95,7 @@
             opacity: 0.9;
         }
         .instrument-overview {
+            position: relative;
             background: var(--card-bg);
             border-radius: 15px;
             padding: 30px;
@@ -254,6 +255,26 @@
             opacity: 0.7;
             margin-left: 5px;
         }
+        .help-btn {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1px solid #ccc;
+            background: var(--card-bg);
+            color: var(--stat-label);
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+            line-height: 1;
+        }
+        .help-btn:hover {
+            background: #667eea;
+            color: #fff;
+            border-color: #667eea;
+        }
     </style>
 </head>
 <body>
@@ -346,6 +367,15 @@
             const content = document.getElementById('content');
             let html = '';
 
+            const instrumentHelp = {
+                'XAU (Золото)': 'Золото — защитный актив. Ключевые игроки: Commercials (хеджеры, добытчики) vs Speculators (фонды). Когда хеджеры наращивают лонги, а спекулянты сокращают — бычий сигнал. Высокий COT Index (>80%) = перекупленность.',
+                'XAG (Серебро)': 'Серебро — промышленный + защитный металл. Более волатильно чем золото. Те же группы: Commercials (хеджеры) vs Speculators. Сигналы аналогичны золоту.',
+                'EUR/USD': 'Евро/Доллар. Ключевые группы: Asset Managers (институциональные инвесторы) vs Leveraged Funds (хедж-фонды). Расхождение между ними — опережающий сигнал разворота.',
+                'GBP/USD': 'Фунт/Доллар. Те же группы что и по EUR/USD. Внимание на Asset Managers — они historically точнее в прогнозе направления.',
+                'USD/JPY': 'Доллар/Йена. Йена — валюта-убежище. Leveraged Funds часто используют для carry trade. Резкое изменение позиций может сигналить о смене risk-on/risk-off.',
+                'AUD/USD': 'Австралиец/Доллар — прокси на сырьё и Китай. Asset Managers часто опережают Leveraged Funds в разворотах. Следи за дивергенцией между ними.'
+            };
+
             const instruments = [
                 { key: 'XAU (Золото)', url: 'gold', icon: '<i class="bi bi-gem icon-gold"></i>' },
                 { key: 'XAG (Серебро)', url: 'silver', icon: '<i class="bi bi-circle icon-silver"></i>' },
@@ -367,6 +397,13 @@
             }
 
             content.innerHTML = html;
+
+            // Init popovers
+            setTimeout(() => {
+                document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
+                    new bootstrap.Popover(el);
+                });
+            }, 100);
         }
 
         function renderInstrumentOverview(instrument, data) {
@@ -433,6 +470,9 @@
                             Подробный анализ <i class="bi bi-arrow-right"></i>
                         </a>
                     </div>
+                    <button class="help-btn" onclick="event.stopPropagation()" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-content="${instrumentHelp[instrument.key] || 'Нет инструкции'}" data-bs-placement="left" title="Как читать ${instrument.key}">
+                        <i class="bi bi-question-lg"></i>
+                    </button>
                 </div>
             `;
 
