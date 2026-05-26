@@ -255,25 +255,45 @@
             opacity: 0.7;
             margin-left: 5px;
         }
-        .help-btn {
-            position: absolute;
-            bottom: 15px;
-            right: 15px;
-            width: 32px;
-            height: 32px;
+        .faq-btn {
+            position: fixed;
+            bottom: 25px;
+            right: 25px;
+            width: 50px;
+            height: 50px;
             border-radius: 50%;
-            border: 1px solid #ccc;
-            background: var(--card-bg);
-            color: var(--stat-label);
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: all 0.3s;
-            line-height: 1;
-        }
-        .help-btn:hover {
-            background: #667eea;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #fff;
-            border-color: #667eea;
+            cursor: pointer;
+            font-size: 1.4rem;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            z-index: 999;
+            transition: transform 0.3s;
+        }
+        .faq-btn:hover {
+            transform: scale(1.1);
+        }
+        .faq-section h5 {
+            color: #667eea;
+            font-weight: 700;
+            margin-top: 20px;
+            margin-bottom: 8px;
+        }
+        .faq-section p {
+            font-size: 0.92rem;
+            line-height: 1.6;
+            color: #555;
+            margin-bottom: 12px;
+        }
+        .faq-section .metric-name {
+            font-weight: 700;
+            color: #333;
+        }
+        .faq-section {
+            max-height: 65vh;
+            overflow-y: auto;
+            padding-right: 10px;
         }
     </style>
 </head>
@@ -363,15 +383,6 @@
             }
         }
 
-        const instrumentHelp = {
-            'XAU (Золото)': 'Золото — защитный актив. Ключевые игроки: Commercials (хеджеры, добытчики) vs Speculators (фонды). Когда хеджеры наращивают лонги, а спекулянты сокращают — бычий сигнал.',
-            'XAG (Серебро)': 'Серебро — промышленный + защитный металл. Более волатильно чем золото. Те же группы: Commercials (хеджеры) vs Speculators. Сигналы аналогичны золоту.',
-            'EUR/USD': 'Евро/Доллар. Ключевые группы: Asset Managers (институциональные инвесторы) vs Leveraged Funds (хедж-фонды). Расхождение между ними — опережающий сигнал разворота.',
-            'GBP/USD': 'Фунт/Доллар. Те же группы что и по EUR/USD. Внимание на Asset Managers — они historically точнее в прогнозе направления.',
-            'USD/JPY': 'Доллар/Йена. Йена — валюта-убежище. Leveraged Funds часто используют для carry trade. Резкое изменение позиций может сигналить о смене risk-on/risk-off.',
-            'AUD/USD': 'Австралиец/Доллар — прокси на сырьё и Китай. Asset Managers часто опережают Leveraged Funds в разворотах. Следи за дивергенцией между ними.'
-        };
-
         function renderOverview() {
             const content = document.getElementById('content');
             let html = '';
@@ -397,13 +408,6 @@
             }
 
             content.innerHTML = html;
-
-            // Init popovers
-            setTimeout(() => {
-                document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
-                    new bootstrap.Popover(el);
-                });
-            }, 100);
         }
 
         function renderInstrumentOverview(instrument, data) {
@@ -470,9 +474,6 @@
                             Подробный анализ <i class="bi bi-arrow-right"></i>
                         </a>
                     </div>
-                    <button class="help-btn" onclick="event.stopPropagation()" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-content="${instrumentHelp[instrument.key] || 'Нет инструкции'}" data-bs-placement="left" title="Как читать ${instrument.key}">
-                        <i class="bi bi-question-lg"></i>
-                    </button>
                 </div>
             `;
 
@@ -591,5 +592,53 @@
         // Auto-refresh every 5 minutes
         setInterval(loadData, 5 * 60 * 1000);
     </script>
+
+    <!-- FAQ Button -->
+    <button class="faq-btn" data-bs-toggle="modal" data-bs-target="#faqModal" title="FAQ">
+        <i class="bi bi-question-lg"></i>
+    </button>
+
+    <!-- FAQ Modal -->
+    <div class="modal fade" id="faqModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff;">
+                    <h3 class="modal-title"><i class="bi bi-info-circle"></i> Как пользоваться FIN Dashboard</h3>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body faq-section">
+
+                    <h5>Что такое COT-отчёт?</h5>
+                    <p>COT (Commitments of Traders) — еженедельный отчёт CFTC, показывающий позиции крупных трейдеров на фьючерсных рынках. Публикуется каждую пятницу. Это единственный легальный способ «подсмотреть» куда ставят крупные игроки.</p>
+
+                    <h5>Группы трейдеров</h5>
+                    <p><span class="metric-name">Commercials (Хеджеры)</span> — производители и потребители сырья. «Умные деньги»: знают рынок изнутри. Покупают на минимумах, продают на максимумах. Для золота и серебра.</p>
+                    <p><span class="metric-name">Speculators (Спекулянты)</span> — фонды и крупные трейдеры. «Толпа»: часто запаздывают с входом и выходом. Для золота и серебра.</p>
+                    <p><span class="metric-name">Asset Managers</span> — институциональные инвесторы (пенсионные фонды, управляющие). Стратегические позиции. Для валют (EUR/USD, GBP/USD, USD/JPY, AUD/USD).</p>
+                    <p><span class="metric-name">Leveraged Funds</span> — хедж-фонды с кредитным плечом. Спекулятивные позиции, быстрые входы и выходы. Для валют.</p>
+
+                    <h5>Метрики анализа</h5>
+                    <p><span class="metric-name">1. Вердикт (цветная полоса)</span> — итоговая агрегация всех метрик. От «Сильный бычий консенсус» (зелёный) до «Сильный медвежий» (красный). Учитывает OI, дивергенции, тренд и общий сентимент.</p>
+                    <p><span class="metric-name">2. Smart Money vs Crowd</span> — дивергенция между «умными деньгами» и «толпой». Когда Commercials/Asset Managers покупают, а Speculators/Leveraged Funds продают — бычий сигнал (разворот вверх). И наоборот.</p>
+                    <p><span class="metric-name">3. Price vs Positions</span> — дивергенция цены и позиций. Цена растёт, а позиции падают? Значит рост не поддержан — риск разворота вниз. Цена падает, а позиции растут? Крупные игроки накапливают — возможен разворот вверх.</p>
+                    <p><span class="metric-name">4. OI + Net</span> — связка открытого интереса и нетто-позиций. OI↑ + Net↑ = новые деньги в лонги. OI↑ + Net↓ = новые деньги в шорты. OI↓ = рынок сжимается, слабый сигнал.</p>
+                    <p><span class="metric-name">5. Тренд позиций</span> — направление нетто-позиций за последние 4 недели. Показывает устойчивость движения крупных игроков.</p>
+
+                    <h5>Сентимент (🟢/🔴)</h5>
+                    <p>Показывает текущую направленность позиций спекулянтов/Leveraged Funds: нетто-лонг (🟢) или нетто-шорт (🔴). Это НЕ торговый сигнал сам по себе — только контекст. Спекулянты могут быть нетто-лонг, но сокращать позиции (медвежий сдвиг).</p>
+
+                    <h5>Как использовать для торговли</h5>
+                    <p><span class="metric-name">Лучший сетап:</span> ищи инструменты где Вердикт «Умеренно бычий» или лучше + Smart Money дивергенция бычья. Это значит: несколько метрик одновременно указывают в одну сторону.</p>
+                    <p><span class="metric-name">Худший сетап:</span> Вердикт нейтральный + все метрики разнонаправлены. Нет явного края — лучше пропустить.</p>
+                    <p><span class="metric-name">Важно:</span> COT — опережающий, но НЕ тайминговый индикатор. Сигнал может реализоваться через 1-3 недели. Используй вместе с техническим анализом для входа.</p>
+
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

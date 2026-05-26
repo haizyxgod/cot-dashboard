@@ -223,6 +223,46 @@
             text-align: center;
             padding: 50px;
         }
+        .faq-btn {
+            position: fixed;
+            bottom: 25px;
+            right: 25px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            cursor: pointer;
+            font-size: 1.4rem;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            z-index: 999;
+            transition: transform 0.3s;
+        }
+        .faq-btn:hover {
+            transform: scale(1.1);
+        }
+        .faq-section {
+            max-height: 65vh;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+        .faq-section h5 {
+            color: #667eea;
+            font-weight: 700;
+            margin-top: 20px;
+            margin-bottom: 8px;
+        }
+        .faq-section p {
+            font-size: 0.92rem;
+            line-height: 1.6;
+            color: #555;
+            margin-bottom: 12px;
+        }
+        .faq-section .metric-name {
+            font-weight: 700;
+            color: #333;
+        }
         .icon-gold { color: #FFD700; font-size: 2rem; }
         .icon-silver { color: #C0C0C0; font-size: 2rem; }
         .icon-eur { color: #003399; font-size: 2rem; }
@@ -874,5 +914,53 @@
 
         window.addEventListener('load', loadData);
     </script>
+
+    <!-- FAQ Button -->
+    <button class="faq-btn" data-bs-toggle="modal" data-bs-target="#faqModal" title="FAQ">
+        <i class="bi bi-question-lg"></i>
+    </button>
+
+    <!-- FAQ Modal -->
+    <div class="modal fade" id="faqModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff;">
+                    <h3 class="modal-title"><i class="bi bi-info-circle"></i> Как пользоваться FIN Dashboard</h3>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body faq-section">
+
+                    <h5>Что такое COT-отчёт?</h5>
+                    <p>COT (Commitments of Traders) — еженедельный отчёт CFTC, показывающий позиции крупных трейдеров на фьючерсных рынках. Публикуется каждую пятницу. Это единственный легальный способ «подсмотреть» куда ставят крупные игроки.</p>
+
+                    <h5>Группы трейдеров</h5>
+                    <p><span class="metric-name">Commercials (Хеджеры)</span> — производители и потребители сырья. «Умные деньги»: знают рынок изнутри. Покупают на минимумах, продают на максимумах. Для золота и серебра.</p>
+                    <p><span class="metric-name">Speculators (Спекулянты)</span> — фонды и крупные трейдеры. «Толпа»: часто запаздывают с входом и выходом. Для золота и серебра.</p>
+                    <p><span class="metric-name">Asset Managers</span> — институциональные инвесторы (пенсионные фонды, управляющие). Стратегические позиции. Для валют (EUR/USD, GBP/USD, USD/JPY, AUD/USD).</p>
+                    <p><span class="metric-name">Leveraged Funds</span> — хедж-фонды с кредитным плечом. Спекулятивные позиции, быстрые входы и выходы. Для валют.</p>
+
+                    <h5>Метрики анализа</h5>
+                    <p><span class="metric-name">1. Вердикт (цветная полоса)</span> — итоговая агрегация всех метрик. От «Сильный бычий консенсус» (зелёный) до «Сильный медвежий» (красный). Учитывает OI, дивергенции, тренд и общий сентимент.</p>
+                    <p><span class="metric-name">2. Smart Money vs Crowd</span> — дивергенция между «умными деньгами» и «толпой». Когда Commercials/Asset Managers покупают, а Speculators/Leveraged Funds продают — бычий сигнал (разворот вверх). И наоборот.</p>
+                    <p><span class="metric-name">3. Price vs Positions</span> — дивергенция цены и позиций. Цена растёт, а позиции падают? Значит рост не поддержан — риск разворота вниз. Цена падает, а позиции растут? Крупные игроки накапливают — возможен разворот вверх.</p>
+                    <p><span class="metric-name">4. OI + Net</span> — связка открытого интереса и нетто-позиций. OI↑ + Net↑ = новые деньги в лонги. OI↑ + Net↓ = новые деньги в шорты. OI↓ = рынок сжимается, слабый сигнал.</p>
+                    <p><span class="metric-name">5. Тренд позиций</span> — направление нетто-позиций за последние 4 недели. Показывает устойчивость движения крупных игроков.</p>
+
+                    <h5>Сентимент (🟢/🔴)</h5>
+                    <p>Показывает текущую направленность позиций спекулянтов/Leveraged Funds: нетто-лонг (🟢) или нетто-шорт (🔴). Это НЕ торговый сигнал сам по себе — только контекст. Спекулянты могут быть нетто-лонг, но сокращать позиции (медвежий сдвиг).</p>
+
+                    <h5>Как использовать для торговли</h5>
+                    <p><span class="metric-name">Лучший сетап:</span> ищи инструменты где Вердикт «Умеренно бычий» или лучше + Smart Money дивергенция бычья. Это значит: несколько метрик одновременно указывают в одну сторону.</p>
+                    <p><span class="metric-name">Худший сетап:</span> Вердикт нейтральный + все метрики разнонаправлены. Нет явного края — лучше пропустить.</p>
+                    <p><span class="metric-name">Важно:</span> COT — опережающий, но НЕ тайминговый индикатор. Сигнал может реализоваться через 1-3 недели. Используй вместе с техническим анализом для входа.</p>
+
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>
