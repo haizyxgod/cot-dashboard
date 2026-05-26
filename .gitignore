@@ -5,3 +5,5 @@ __pycache__/
 .claude/
 cot_data.json
 cot_dashboard/cot_data.json
+trading_bot/.env
+*.pyc
