@@ -2,9 +2,8 @@ services:
   - type: web
     name: cot-dashboard
     runtime: python
-    rootDir: cot_dashboard
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    buildCommand: pip install -r cot_dashboard/requirements.txt
+    startCommand: cd cot_dashboard && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     envVars:
       - key: SECRET_KEY
         generateValue: true
