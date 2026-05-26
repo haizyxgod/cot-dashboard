@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COT Dashboard - Детальный анализ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #FDF5E6;
+            --text: #333;
+            --card-bg: #fff;
+            --card-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            --card-border: #E8E0D5;
+            --stat-bg: #F5F0E8;
+            --stat-label: #8B7355;
+            --stat-value: #333;
+            --divider: #E8E0D5;
+            --navbar-bg: linear-gradient(135deg, #8B7355 0%, #A0522D 100%);
+            --muted: #8B7355;
+            --spinner: #8B7355;
+            --chart-grid: #E8E0D5;
+            --chart-text: #666;
+            --chart-title: #333;
+        }
+        [data-theme="dark"] {
+            --bg: #1a1a1a;
+            --text: #e0e0e0;
+            --card-bg: #2d2d2d;
+            --card-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            --card-border: #444;
+            --stat-bg: #3a3a3a;
+            --stat-label: #aaa;
+            --stat-value: #fff;
+            --divider: #444;
+            --navbar-bg: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            --muted: #aaa;
+            --spinner: #aaa;
+            --chart-grid: #444;
+            --chart-text: #aaa;
+            --chart-title: #fff;
+        }
+        .theme-toggle {
+            background: none;
+            border: 1px solid rgba(255,255,255,0.3);
+            color: #fff;
+            border-radius: 20px;
+            padding: 5px 12px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: all 0.3s;
+            margin-left: 10px;
+        }
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        body {
+            background: var(--bg);
+            min-height: 100vh;
+            padding: 0;
+            color: var(--text);
+        }
+        .navbar {
+            background: var(--navbar-bg);
+            padding: 15px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+        }
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff !important;
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.75) !important;
+            margin: 0 10px;
+            transition: color 0.3s;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: #fff !important;
+        }
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+        .page-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            padding: 40px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .page-header h1 {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .instrument-card {
+            background: var(--card-bg);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 25px;
+            border: 1px solid var(--card-border);
+            box-shadow: var(--card-shadow);
+        }
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .data-table {
+            width: 100%;
+            margin-top: 15px;
+        }
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--divider);
+        }
+        .data-row:last-child {
+            border-bottom: none;
+        }
+        .data-label {
+            font-weight: 600;
+            color: var(--stat-label);
+        }
+        .data-value {
+            font-weight: bold;
+            color: var(--stat-value);
+        }
+        .sentiment-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        .sentiment-bullish {
+            background: #28a745;
+            color: white;
+        }
+        .sentiment-bearish {
+            background: #dc3545;
+            color: white;
+        }
+        .change-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .change-up {
+            background: #28a745;
+            color: white;
+        }
+        .change-down {
+            background: #dc3545;
+            color: white;
+        }
+        .change-neutral {
+            background: #6c757d;
+            color: white;
+        }
+        .signal-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            margin: 5px;
+        }
+        .signal-strong-bullish {
+            background: #28a745;
+            color: white;
+        }
+        .signal-strong-bearish {
+            background: #dc3545;
+            color: white;
+        }
+        .signal-weak-bullish {
+            background: #d4edda;
+            color: #155724;
+        }
+        .signal-weak-bearish {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .signal-neutral {
+            background: #6c757d;
+            color: white;
+        }
+        .trend-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 15px;
+            background: var(--stat-bg);
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .trend-arrow {
+            font-size: 2rem;
+        }
+        .trend-up { color: #28a745; }
+        .trend-down { color: #dc3545; }
+        .trend-sideways { color: #6c757d; }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+        .loading {
+            text-align: center;
+            padding: 50px;
+        }
+        .icon-gold { color: #FFD700; font-size: 2rem; }
+        .icon-silver { color: #C0C0C0; font-size: 2rem; }
+        .icon-eur { color: #003399; font-size: 2rem; }
+        .icon-gbp { color: #C8102E; font-size: 2rem; }
+        .icon-jpy { color: #BC002D; font-size: 2rem; }
+        .icon-aud { color: #006400; font-size: 2rem; }
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 10px 25px;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .refresh-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .divergence-detail-card {
+            background: var(--stat-bg);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        .divergence-detail-card h6 {
+            color: #667eea;
+            margin-bottom: 12px;
+        }
+        .divergence-detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--divider);
+            font-size: 0.9rem;
+        }
+        .divergence-detail-row:last-child {
+            border-bottom: none;
+        }
+        .divergence-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin: 2px;
+        }
+        .divergence-bullish {
+            background: rgba(40, 167, 69, 0.2);
+            color: #28a745;
+            border: 1px solid #28a745;
+        }
+        .divergence-bearish {
+            background: rgba(220, 53, 69, 0.2);
+            color: #dc3545;
+            border: 1px solid #dc3545;
+        }
+        .divergence-neutral {
+            background: rgba(108, 117, 125, 0.2);
+            color: #adb5bd;
+            border: 1px solid #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-graph-up-arrow"></i> COT Dashboard
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Обзор</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/gold" id="nav-gold">Золото</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/silver" id="nav-silver">Серебро</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/eur" id="nav-eur">EUR/USD</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/gbp" id="nav-gbp">GBP/USD</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/usdjpy" id="nav-usdjpy">USD/JPY</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/aud" id="nav-aud">AUD/USD</a>
+                    </li>
+                    <li class="nav-item">
+                        <button class="refresh-btn ms-3" onclick="refreshData()">
+                            <i class="bi bi-arrow-clockwise"></i> Обновить
+                        </button>
+                        <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Переключить тему">
+                            <i class="bi bi-moon-fill"></i>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <!-- Page Header -->
+        <div class="page-header" id="pageHeader">
+            <h1 id="instrumentTitle">Загрузка...</h1>
+            <p id="instrumentSubtitle">Детальный анализ позиций трейдеров</p>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="loading">
+            <div class="spinner-border" role="status" style="color: var(--spinner);">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p style="color: var(--muted); margin-top: 15px;">Загрузка данных...</p>
+        </div>
+
+        <!-- Content -->
+        <div id="content" style="display: none;">
+            <!-- Instrument details will be loaded here -->
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const instrumentParam = "{{ instrument }}";
+        let instrumentData = {};
+
+        const instrumentConfig = {
+            'gold': {
+                name: 'XAU (Золото)',
+                icon: '<i class="bi bi-gem icon-gold"></i>',
+                key: 'XAU (Золото)'
+            },
+            'silver': {
+                name: 'XAG (Серебро)',
+                icon: '<i class="bi bi-circle icon-silver"></i>',
+                key: 'XAG (Серебро)'
+            },
+            'eur': {
+                name: 'EUR/USD',
+                icon: '<i class="bi bi-currency-euro icon-eur"></i>',
+                key: 'EUR/USD'
+            },
+            'gbp': {
+                name: 'GBP/USD',
+                icon: '<i class="bi bi-currency-pound icon-gbp"></i>',
+                key: 'GBP/USD'
+            },
+            'usdjpy': {
+                name: 'USD/JPY',
+                icon: '<i class="bi bi-currency-yen icon-jpy"></i>',
+                key: 'USD/JPY'
+            },
+            'aud': {
+                name: 'AUD/USD',
+                icon: '<i class="bi bi-currency-dollar icon-aud"></i>',
+                key: 'AUD/USD'
+            }
+        };
+
+        async function loadData() {
+            try {
+                const config = instrumentConfig[instrumentParam];
+                if (!config) {
+                    throw new Error('Invalid instrument');
+                }
+
+                // Update navigation
+                document.getElementById(`nav-${instrumentParam}`)?.classList.add('active');
+
+                // Update header
+                document.getElementById('instrumentTitle').innerHTML = `${config.icon} ${config.name}`;
+
+                // Fetch data
+                const response = await fetch(`/api/instrument/${instrumentParam}`);
+                instrumentData = await response.json();
+
+                renderInstrument();
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } catch (error) {
+                console.error('Ошибка загрузки данных:', error);
+                document.getElementById('loading').innerHTML =
+                    '<p style="color: var(--muted);">Ошибка загрузки данных. <a href="/" style="color: #667eea;">Вернуться на главную</a></p>';
+            }
+        }
+
+        function renderInstrument() {
+            const content = document.getElementById('content');
+            const data = instrumentData.data;
+            const current = data.records[0];
+            const changes = data.changes;
+            const analysis = data.analysis || {};
+            const allRecords = data.records;
+
+            const isGold = instrumentData.instrument.includes('Золото');
+            const sent = analysis.sentiment || {};
+            const sentiment = sent.text || 'Нейтральный';
+            const sentimentClass = sent.direction === 'bullish' ? 'sentiment-bullish' : 'sentiment-bearish';
+
+            let html = `
+                <!-- Current Positions -->
+                <div class="instrument-card">
+                    <div class="section-title">
+                        <i class="bi bi-bar-chart-fill"></i> Текущие позиции
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="data-table">
+                                <div class="data-row">
+                                    <span class="data-label">Дата отчета:</span>
+                                    <span class="data-value">${formatDate(current.date)}</span>
+                                </div>
+                                <div class="data-row">
+                                    <span class="data-label">Открытый интерес:</span>
+                                    <span class="data-value">${formatNumber(current.open_interest)}</span>
+                                </div>
+            `;
+
+            if (isGold) {
+                html += `
+                                <div class="data-row">
+                                    <span class="data-label">Спекулянты Long:</span>
+                                    <span class="data-value">${formatNumber(current.speculative_long)}</span>
+                                </div>
+                                <div class="data-row">
+                                    <span class="data-label">Спекулянты Short:</span>
+                                    <span class="data-value">${formatNumber(current.speculative_short)}</span>
+                                </div>
+                                <div class="data-row">
+                                    <span class="data-label">Нетто-позиция:</span>
+                                    <span class="data-value">${formatNumber(current.speculative_net)}</span>
+                                </div>
+                                <div class="data-row">
+                                    <span class="data-label">Спекулянты % от OI:</span>
+                                    <span class="data-value">Long ${current.spec_long_pct}% / Short ${current.spec_short_pct}%</span>
+                                </div>
+                `;
+            } else {
+                html += `
+                                <div class="data-row">
+                                    <span class="data-label">Leveraged Funds Long:</span>
+                                    <span class="data-value">${formatNumber(current.leveraged_long)}</span>
+                                </div>
+                                <div class="data-row">
+                                    <span class="data-label">Leveraged Funds Short:</span>
+                                    <span class="data-value">${formatNumber(current.leveraged_short)}</span>
+                                </div>
+                                <div class="data-row">
+                                    <span class="data-label">Нетто-позиция:</span>
+                                    <span class="data-value">${formatNumber(current.leveraged_net)}</span>
+                                </div>
+                                <div class="data-row">
+                                    <span class="data-label">Lev. Funds % от OI:</span>
+                                    <span class="data-value">Long ${current.lev_long_pct}% / Short ${current.lev_short_pct}%</span>
+                                </div>
+                `;
+            }
+
+            html += `
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="text-center">
+                                <h3>Настроение рынка</h3>
+                                <span class="sentiment-badge ${sentimentClass}">${sentiment}</span>
+                                ${analysis.verdict ? `
+                                <div class="verdict-bar verdict-${analysis.verdict.signal} mt-3">
+                                    <strong>${analysis.verdict.text}</strong>
+                                    <div style="font-size: 0.85rem; opacity: 0.8; margin-top: 4px;">
+                                        ${analysis.verdict.reasons.join('; ')}
+                                        <span class="verdict-score">(${analysis.verdict.score > 0 ? '+' : ''}${analysis.verdict.score})</span>
+                                    </div>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weekly Changes -->
+            `;
+
+            if (changes) {
+                html += `
+                <div class="instrument-card">
+                    <div class="section-title">
+                        <i class="bi bi-graph-up"></i> Изменения за неделю
+                    </div>
+                    <div class="data-table">
+                `;
+
+                if (isGold && changes.speculative_net_change !== undefined) {
+                    html += renderChangeRow('Нетто-позиция спекулянтов', changes.speculative_net_change);
+                    html += renderChangeRow('Открытый интерес', changes.open_interest_change);
+                } else if (!isGold && changes.leveraged_net_change !== undefined) {
+                    html += renderChangeRow('Нетто-позиция Lev. Funds', changes.leveraged_net_change);
+                    html += renderChangeRow('Открытый интерес', changes.open_interest_change);
+                }
+
+                html += `
+                    </div>
+                </div>
+                `;
+            }
+
+            // Historical Chart
+            html += `
+                <div class="instrument-card">
+                    <div class="section-title">
+                        <i class="bi bi-graph-up-arrow"></i> Исторический график (12 недель)
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="mainChart"></canvas>
+                    </div>
+                </div>
+            `;
+
+            // Advanced Analysis
+            if (analysis) {
+                html += `
+                <div class="instrument-card">
+                    <div class="section-title">
+                        <i class="bi bi-lightbulb"></i> Расширенный анализ
+                    </div>
+                    <div class="row">
+                `;
+
+                // Open Interest Analysis
+                if (analysis.open_interest_analysis) {
+                    const oiAnalysis = analysis.open_interest_analysis;
+                    const signalClass = `signal-${oiAnalysis.signal.replace('_', '-')}`;
+                    html += `
+                        <div class="col-md-6 mb-4">
+                            <h5>💹 Анализ открытого интереса</h5>
+                            <div class="trend-indicator">
+                                <div>
+                                    <strong>Изменение OI:</strong> ${formatNumber(oiAnalysis.oi_change)}
+                                    (${oiAnalysis.oi_change_pct > 0 ? '+' : ''}${oiAnalysis.oi_change_pct}%)
+                                </div>
+                            </div>
+                            <span class="signal-badge ${signalClass}">
+                                ${oiAnalysis.interpretation}
+                            </span>
+                        </div>
+                    `;
+                }
+
+                // Trend
+                if (analysis.trend) {
+                    const trend = analysis.trend;
+                    const trendClass = `trend-${trend.direction}`;
+                    const trendIcon = trend.direction === 'up' ? '📈' : trend.direction === 'down' ? '📉' : '➡️';
+                    html += `
+                        <div class="col-md-12">
+                            <h5>📊 Тренд позиций</h5>
+                            <div class="trend-indicator">
+                                <span class="trend-arrow ${trendClass}">${trendIcon}</span>
+                                <div>
+                                    <strong>${trend.description}</strong><br>
+                                    <small style="color: var(--muted);">Анализ за ${trend.weeks_analyzed} недель</small>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // Trader Divergence
+                if (analysis.trader_divergence) {
+                    const td = analysis.trader_divergence;
+                    const tdBadge = td.signal === 'bullish_divergence' ? 'divergence-bullish' :
+                                    td.signal === 'bearish_divergence' ? 'divergence-bearish' : 'divergence-neutral';
+                    const tdIcon = td.signal === 'bullish_divergence' ? '▲' :
+                                   td.signal === 'bearish_divergence' ? '▼' : '◆';
+                    html += `
+                        <div class="col-md-6 mb-4">
+                            <div class="divergence-detail-card">
+                                <h6><span class="divergence-badge ${tdBadge}">${tdIcon} Smart Money vs Crowd</span></h6>
+                                <p style="color: #ccc; font-size: 0.9rem;">${td.interpretation}</p>
+                                <div class="divergence-detail-row">
+                                    <span>${td.smart_label}:</span>
+                                    <span style="color: ${td.smart_money_change > 0 ? '#28a745' : '#dc3545'}">
+                                        ${td.smart_money_change > 0 ? '+' : ''}${formatNumber(td.smart_money_change)}
+                                    </span>
+                                </div>
+                                <div class="divergence-detail-row">
+                                    <span>${td.crowd_label}:</span>
+                                    <span style="color: ${td.crowd_change > 0 ? '#28a745' : '#dc3545'}">
+                                        ${td.crowd_change > 0 ? '+' : ''}${formatNumber(td.crowd_change)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // Price Divergence
+                if (analysis.price_divergence) {
+                    const pd = analysis.price_divergence;
+                    const pdBadge = pd.signal === 'bullish_divergence' ? 'divergence-bullish' :
+                                    pd.signal === 'bearish_divergence' ? 'divergence-bearish' :
+                                    pd.signal === 'confirming' ? 'divergence-neutral' : 'divergence-neutral';
+                    const pdIcon = pd.signal === 'bullish_divergence' ? '▲' :
+                                   pd.signal === 'bearish_divergence' ? '▼' : '◆';
+                    html += `
+                        <div class="col-md-6 mb-4">
+                            <div class="divergence-detail-card">
+                                <h6><span class="divergence-badge ${pdBadge}">${pdIcon} Price vs Positions</span></h6>
+                                <p style="color: #ccc; font-size: 0.9rem;">${pd.interpretation}</p>
+                    `;
+                    if (pd.price_change !== undefined) {
+                        html += `
+                                <div class="divergence-detail-row">
+                                    <span>Изменение цены:</span>
+                                    <span style="color: ${pd.price_change > 0 ? '#28a745' : '#dc3545'}">
+                                        ${pd.price_change > 0 ? '+' : ''}${pd.price_change.toFixed(2)} (${pd.price_change_pct > 0 ? '+' : ''}${pd.price_change_pct}%)
+                                    </span>
+                                </div>
+                        `;
+                    }
+                    if (pd.position_change !== undefined) {
+                        html += `
+                                <div class="divergence-detail-row">
+                                    <span>Изменение позиций:</span>
+                                    <span style="color: ${pd.position_change > 0 ? '#28a745' : '#dc3545'}">
+                                        ${pd.position_change > 0 ? '+' : ''}${formatNumber(pd.position_change)}
+                                    </span>
+                                </div>
+                        `;
+                    }
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `
+                    </div>
+                </div>
+                `;
+            }
+
+            content.innerHTML = html;
+
+            // Create chart
+            setTimeout(() => createChart(allRecords, isGold), 100);
+        }
+
+        function renderChangeRow(label, change) {
+            const changeClass = change > 0 ? 'change-up' : (change < 0 ? 'change-down' : 'change-neutral');
+            const arrow = change > 0 ? '↑' : (change < 0 ? '↓' : '→');
+
+            return `
+                <div class="data-row">
+                    <span class="data-label">${label}:</span>
+                    <span class="change-indicator ${changeClass}">
+                        ${arrow} ${formatNumber(Math.abs(change))}
+                    </span>
+                </div>
+            `;
+        }
+
+        function createChart(records, isGold) {
+            const canvas = document.getElementById('mainChart');
+            if (!canvas) return;
+
+            const netKey = isGold ? 'speculative_net' : 'leveraged_net';
+
+            const labels = records.slice(0, 12).reverse().map(r => {
+                const date = new Date(r.date);
+                return date.toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' });
+            });
+
+            const netData = records.slice(0, 12).reverse().map(r => r[netKey]);
+            const oiData = records.slice(0, 12).reverse().map(r => r.open_interest);
+
+            const cs = getComputedStyle(document.documentElement);
+            const gridColor = cs.getPropertyValue('--chart-grid').trim();
+            const tickColor = cs.getPropertyValue('--chart-text').trim();
+            const titleColor = cs.getPropertyValue('--chart-title').trim();
+            const textColor = cs.getPropertyValue('--text').trim();
+
+            if (mainChart) mainChart.destroy();
+            mainChart = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Нетто-позиция',
+                            data: netData,
+                            borderColor: 'rgb(102, 126, 234)',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            tension: 0.3,
+                            yAxisID: 'y',
+                            borderWidth: 3
+                        },
+                        {
+                            label: 'Открытый интерес',
+                            data: oiData,
+                            borderColor: 'rgb(255, 159, 64)',
+                            backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                            tension: 0.3,
+                            yAxisID: 'y1',
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: textColor,
+                                font: {
+                                    size: 14
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Нетто-позиция',
+                                color: titleColor
+                            },
+                            ticks: {
+                                color: tickColor
+                            },
+                            grid: {
+                                color: gridColor
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Открытый интерес',
+                                color: titleColor
+                            },
+                            ticks: {
+                                color: tickColor
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                color: tickColor
+                            },
+                            grid: {
+                                color: gridColor
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function formatNumber(num) {
+            return new Intl.NumberFormat('ru-RU').format(num);
+        }
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        async function refreshData() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('content').style.display = 'none';
+
+            try {
+                await fetch('/api/update');
+                await loadData();
+            } catch (error) {
+                console.error('Ошибка обновления:', error);
+                alert('Ошибка при обновлении данных');
+            }
+        }
+
+        // Theme toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-theme') === 'dark';
+            const newTheme = isDark ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('cot-theme', newTheme);
+            updateThemeIcon(newTheme);
+            updateChartTheme();
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.querySelector('#themeToggle i');
+            if (icon) {
+                icon.className = theme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
+            }
+        }
+
+        let mainChart = null;
+
+        function updateChartTheme() {
+            if (!mainChart) return;
+            const cs = getComputedStyle(document.documentElement);
+            const gridColor = cs.getPropertyValue('--chart-grid').trim();
+            const tickColor = cs.getPropertyValue('--chart-text').trim();
+            const titleColor = cs.getPropertyValue('--chart-title').trim();
+            const textColor = cs.getPropertyValue('--text').trim();
+
+            mainChart.options.scales.x.grid.color = gridColor;
+            mainChart.options.scales.x.ticks.color = tickColor;
+            mainChart.options.scales.y.grid.color = gridColor;
+            mainChart.options.scales.y.ticks.color = tickColor;
+            mainChart.options.scales.y.title.color = titleColor;
+            mainChart.options.scales.y1.ticks.color = tickColor;
+            mainChart.options.scales.y1.title.color = titleColor;
+            mainChart.options.plugins.legend.labels.color = textColor;
+            mainChart.update();
+        }
+
+        (function() {
+            const saved = localStorage.getItem('cot-theme') || 'light';
+            document.documentElement.setAttribute('data-theme', saved);
+            setTimeout(() => updateThemeIcon(saved), 100);
+        })();
+
+        window.addEventListener('load', loadData);
+    </script>
+</body>
+</html>

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COT Dashboard - Обзор</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --bg: #FDF5E6;
+            --text: #333;
+            --card-bg: #fff;
+            --card-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            --card-border: transparent;
+            --stat-bg: #F5F0E8;
+            --stat-label: #8B7355;
+            --stat-value: #333;
+            --divider: #E8E0D5;
+            --navbar-bg: linear-gradient(135deg, #8B7355 0%, #A0522D 100%);
+            --muted: #8B7355;
+            --spinner: #8B7355;
+        }
+        [data-theme="dark"] {
+            --bg: #1a1a1a;
+            --text: #e0e0e0;
+            --card-bg: #2d2d2d;
+            --card-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            --card-border: #444;
+            --stat-bg: #3a3a3a;
+            --stat-label: #aaa;
+            --stat-value: #fff;
+            --divider: #444;
+            --navbar-bg: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            --muted: #aaa;
+            --spinner: #aaa;
+        }
+        .theme-toggle {
+            background: none;
+            border: 1px solid rgba(255,255,255,0.3);
+            color: #fff;
+            border-radius: 20px;
+            padding: 5px 12px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: all 0.3s;
+            margin-left: 10px;
+        }
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        body {
+            background: var(--bg);
+            min-height: 100vh;
+            padding: 0;
+            color: var(--text);
+        }
+        .navbar {
+            background: var(--navbar-bg);
+            padding: 15px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+        }
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff !important;
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.75) !important;
+            margin: 0 10px;
+            transition: color 0.3s;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: #fff !important;
+        }
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+        .hero-section {
+            text-align: center;
+            padding: 50px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            margin-bottom: 40px;
+        }
+        .hero-section h1 {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .hero-section p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        .instrument-overview {
+            background: var(--card-bg);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 25px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .instrument-overview:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.25);
+            border-color: #667eea;
+        }
+        .instrument-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .instrument-title {
+            font-size: 2rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .icon-gold { color: #FFD700; font-size: 2.5rem; }
+        .icon-silver { color: #C0C0C0; font-size: 2.5rem; }
+        .icon-eur { color: #003399; font-size: 2.5rem; }
+        .icon-gbp { color: #C8102E; font-size: 2.5rem; }
+        .icon-jpy { color: #BC002D; font-size: 2.5rem; }
+        .icon-aud { color: #006400; font-size: 2.5rem; }
+        .sentiment-large {
+            font-size: 3rem;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .stat-card {
+            background: var(--stat-bg);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-label {
+            color: var(--stat-label);
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--stat-value);
+        }
+        .view-details-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .view-details-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            color: white;
+        }
+        .loading {
+            text-align: center;
+            padding: 50px;
+        }
+        .update-info {
+            background: var(--card-bg);
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 10px 25px;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .refresh-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .divergence-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin: 2px;
+        }
+        .divergence-bullish {
+            background: rgba(40, 167, 69, 0.2);
+            color: #28a745;
+            border: 1px solid #28a745;
+        }
+        .divergence-bearish {
+            background: rgba(220, 53, 69, 0.2);
+            color: #dc3545;
+            border: 1px solid #dc3545;
+        }
+        .divergence-neutral {
+            background: rgba(108, 117, 125, 0.2);
+            color: #adb5bd;
+            border: 1px solid #6c757d;
+        }
+        .verdict-bar {
+            margin-top: 15px;
+            padding: 12px 20px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 0.95rem;
+        }
+        .verdict-strong_bullish {
+            background: rgba(40, 167, 69, 0.15);
+            color: #155724;
+            border: 2px solid #28a745;
+        }
+        .verdict-bullish {
+            background: rgba(40, 167, 69, 0.08);
+            color: #1e7e34;
+            border: 1px solid rgba(40, 167, 69, 0.4);
+        }
+        .verdict-neutral {
+            background: rgba(108, 117, 125, 0.08);
+            color: #555;
+            border: 1px solid rgba(108, 117, 125, 0.3);
+        }
+        .verdict-bearish {
+            background: rgba(220, 53, 69, 0.08);
+            color: #a71d2a;
+            border: 1px solid rgba(220, 53, 69, 0.4);
+        }
+        .verdict-strong_bearish {
+            background: rgba(220, 53, 69, 0.15);
+            color: #721c24;
+            border: 2px solid #dc3545;
+        }
+        .verdict-score {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-graph-up-arrow"></i> COT Dashboard
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Обзор</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/gold">Золото</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/silver">Серебро</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/eur">EUR/USD</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/gbp">GBP/USD</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/usdjpy">USD/JPY</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/instrument/aud">AUD/USD</a>
+                    </li>
+                    <li class="nav-item">
+                        <button class="refresh-btn ms-3" onclick="refreshData()">
+                            <i class="bi bi-arrow-clockwise"></i> Обновить
+                        </button>
+                        <button class="theme-toggle" onclick="toggleTheme()" id="themeToggle" title="Переключить тему">
+                            <i class="bi bi-moon-fill"></i>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <div class="main-container">
+        <div class="hero-section">
+            <h1><i class="bi bi-bar-chart-line"></i> COT Dashboard</h1>
+            <p>Анализ позиций трейдеров (Commitments of Traders)</p>
+            <p class="mb-0"><small>Данные обновляются каждое воскресенье в 10:00</small></p>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="loading">
+            <div class="spinner-border" role="status" style="color: var(--spinner);">
+                <span class="visually-hidden">Загрузка...</span>
+            </div>
+            <p style="color: var(--muted); margin-top: 15px;">Загрузка данных...</p>
+        </div>
+
+        <!-- Content -->
+        <div id="content" style="display: none;">
+            <!-- Instruments overview will be loaded here -->
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let cotData = {};
+
+        async function loadData() {
+            try {
+                const response = await fetch('/api/data');
+                cotData = await response.json();
+                renderOverview();
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } catch (error) {
+                console.error('Ошибка загрузки данных:', error);
+                document.getElementById('loading').innerHTML =
+                    '<p style="color: var(--muted);">Ошибка загрузки данных. Попробуйте обновить страницу.</p>';
+            }
+        }
+
+        function renderOverview() {
+            const content = document.getElementById('content');
+            let html = '';
+
+            const instruments = [
+                { key: 'XAU (Золото)', url: 'gold', icon: '<i class="bi bi-gem icon-gold"></i>' },
+                { key: 'XAG (Серебро)', url: 'silver', icon: '<i class="bi bi-circle icon-silver"></i>' },
+                { key: 'EUR/USD', url: 'eur', icon: '<i class="bi bi-currency-euro icon-eur"></i>' },
+                { key: 'GBP/USD', url: 'gbp', icon: '<i class="bi bi-currency-pound icon-gbp"></i>' },
+                { key: 'USD/JPY', url: 'usdjpy', icon: '<i class="bi bi-currency-yen icon-jpy"></i>' },
+                { key: 'AUD/USD', url: 'aud', icon: '<i class="bi bi-currency-dollar icon-aud"></i>' }
+            ];
+
+            instruments.forEach(instrument => {
+                if (cotData[instrument.key] && cotData[instrument.key].records) {
+                    html += renderInstrumentOverview(instrument, cotData[instrument.key]);
+                }
+            });
+
+            // Update info
+            if (cotData.metadata) {
+                html += renderUpdateInfo(cotData.metadata);
+            }
+
+            content.innerHTML = html;
+        }
+
+        function renderInstrumentOverview(instrument, data) {
+            const current = data.records[0];
+            const analysis = data.analysis || {};
+            const isGold = instrument.key.includes('Золото');
+
+            const sentiment = analysis.sentiment || {};
+            const sentimentEmoji = sentiment.direction === 'bullish' ? '🟢' : '🔴';
+            const sentimentText = sentiment.direction === 'bullish' ? 'Бычий' : 'Медвежий';
+
+            let html = `
+                <div class="instrument-overview" onclick="window.location.href='/instrument/${instrument.url}'">
+                    <div class="instrument-header">
+                        <div class="instrument-title">
+                            ${instrument.icon}
+                            <span>${instrument.key}</span>
+                        </div>
+                        <div class="sentiment-large">${sentimentEmoji}</div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Дата отчета</div>
+                            <div class="stat-value">${formatDate(current.date)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Открытый интерес</div>
+                            <div class="stat-value">${formatNumber(current.open_interest)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Нетто-позиция</div>
+                            <div class="stat-value">${formatNumber(sentiment.net_position)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Спекулянты % от OI</div>
+                            <div class="stat-value">${isGold ? current.spec_long_pct + '% / ' + current.spec_short_pct + '%' : current.lev_long_pct + '% / ' + current.lev_short_pct + '%'}</div>
+                            <small class="text-muted">Long / Short</small>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Настроение</div>
+                            <div class="stat-value">${sentimentText}</div>
+                        </div>
+            `;
+
+            html += `
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2 mt-3 justify-content-center">
+                        ${renderDivergenceBadge(analysis.trader_divergence, 'Smart Money')}
+                        ${renderDivergenceBadge(analysis.price_divergence, 'Price')}
+                    </div>
+
+                    ${analysis.verdict ? `
+                    <div class="verdict-bar verdict-${analysis.verdict.signal}">
+                        <strong>${analysis.verdict.text}</strong>
+                        ${analysis.verdict.reasons.length ? ' — ' + analysis.verdict.reasons.join('; ') : ''}
+                        <span class="verdict-score">(${analysis.verdict.score > 0 ? '+' : ''}${analysis.verdict.score})</span>
+                    </div>
+                    ` : ''}
+
+                    <div class="text-center mt-4">
+                        <a href="/instrument/${instrument.url}" class="view-details-btn">
+                            Подробный анализ <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                </div>
+            `;
+
+            return html;
+        }
+
+        function renderDivergenceBadge(div, label) {
+            if (!div || !div.signal) return '';
+
+            let cls = 'divergence-neutral';
+            let icon = '';
+            let text = '';
+
+            switch (div.signal) {
+                case 'bullish_divergence':
+                    cls = 'divergence-bullish';
+                    icon = '▲';
+                    text = `${label}: Bullish`;
+                    break;
+                case 'bearish_divergence':
+                    cls = 'divergence-bearish';
+                    icon = '▼';
+                    text = `${label}: Bearish`;
+                    break;
+                case 'no_divergence':
+                    text = `${label}: No Div`;
+                    break;
+                case 'confirming':
+                    text = `${label}: Confirm`;
+                    break;
+                default:
+                    text = `${label}: N/A`;
+                    break;
+            }
+
+            return `<span class="divergence-badge ${cls}">${icon} ${text}</span>`;
+        }
+
+        function renderUpdateInfo(metadata) {
+            return `
+                <div class="update-info">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <strong><i class="bi bi-clock-history"></i> Последнее обновление:</strong><br>
+                            ${formatDateTime(metadata.last_updated)}
+                        </div>
+                        <div class="col-md-6">
+                            <strong><i class="bi bi-calendar-event"></i> Следующее обновление:</strong><br>
+                            ${formatDateTime(metadata.next_update)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function formatNumber(num) {
+            return new Intl.NumberFormat('ru-RU').format(num);
+        }
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        function formatDateTime(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleString('ru-RU', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        async function refreshData() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('content').style.display = 'none';
+
+            try {
+                await fetch('/api/update');
+                await loadData();
+            } catch (error) {
+                console.error('Ошибка обновления:', error);
+                alert('Ошибка при обновлении данных');
+            }
+        }
+
+        // Load data on page load
+        window.addEventListener('load', loadData);
+
+        // Theme toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-theme') === 'dark';
+            const newTheme = isDark ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('cot-theme', newTheme);
+            updateThemeIcon(newTheme);
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.querySelector('#themeToggle i');
+            if (icon) {
+                icon.className = theme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
+            }
+        }
+
+        // Init theme from localStorage
+        (function() {
+            const saved = localStorage.getItem('cot-theme') || 'light';
+            document.documentElement.setAttribute('data-theme', saved);
+            setTimeout(() => updateThemeIcon(saved), 100);
+        })();
+
+        // Auto-refresh every 5 minutes
+        setInterval(loadData, 5 * 60 * 1000);
+    </script>
+</body>
+</html>

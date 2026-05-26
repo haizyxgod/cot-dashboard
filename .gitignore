@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.claude/
+cot_data.json
+cot_dashboard/cot_data.json
