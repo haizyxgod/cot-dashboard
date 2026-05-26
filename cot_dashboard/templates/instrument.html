@@ -427,7 +427,7 @@
             const analysis = data.analysis || {};
             const allRecords = data.records;
 
-            const isGold = instrumentData.instrument.includes('Золото');
+            const isLegacy = current.speculative_net !== undefined;
             const sent = analysis.sentiment || {};
             const sentiment = sent.text || 'Нейтральный';
             const sentimentClass = sent.direction === 'bullish' ? 'sentiment-bullish' : 'sentiment-bearish';
@@ -451,7 +451,7 @@
                                 </div>
             `;
 
-            if (isGold) {
+            if (isLegacy) {
                 html += `
                                 <div class="data-row">
                                     <span class="data-label">Спекулянты Long:</span>
@@ -524,10 +524,10 @@
                     <div class="data-table">
                 `;
 
-                if (isGold && changes.speculative_net_change !== undefined) {
+                if (isLegacy && changes.speculative_net_change !== undefined) {
                     html += renderChangeRow('Нетто-позиция спекулянтов', changes.speculative_net_change);
                     html += renderChangeRow('Открытый интерес', changes.open_interest_change);
-                } else if (!isGold && changes.leveraged_net_change !== undefined) {
+                } else if (!isLegacy && changes.leveraged_net_change !== undefined) {
                     html += renderChangeRow('Нетто-позиция Lev. Funds', changes.leveraged_net_change);
                     html += renderChangeRow('Открытый интерес', changes.open_interest_change);
                 }
@@ -677,7 +677,7 @@
             content.innerHTML = html;
 
             // Create chart
-            setTimeout(() => createChart(allRecords, isGold), 100);
+            setTimeout(() => createChart(allRecords, isLegacy), 100);
         }
 
         function renderChangeRow(label, change) {
@@ -694,11 +694,11 @@
             `;
         }
 
-        function createChart(records, isGold) {
+        function createChart(records, isLegacy) {
             const canvas = document.getElementById('mainChart');
             if (!canvas) return;
 
-            const netKey = isGold ? 'speculative_net' : 'leveraged_net';
+            const netKey = isLegacy ? 'speculative_net' : 'leveraged_net';
 
             const labels = records.slice(0, 12).reverse().map(r => {
                 const date = new Date(r.date);

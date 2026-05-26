@@ -372,7 +372,7 @@
         function renderInstrumentOverview(instrument, data) {
             const current = data.records[0];
             const analysis = data.analysis || {};
-            const isGold = instrument.key.includes('Золото');
+            const isLegacy = current.speculative_net !== undefined;
 
             const sentiment = analysis.sentiment || {};
             const sentimentEmoji = sentiment.direction === 'bullish' ? '🟢' : '🔴';
@@ -403,7 +403,7 @@
                         </div>
                         <div class="stat-card">
                             <div class="stat-label">Спекулянты % от OI</div>
-                            <div class="stat-value">${isGold ? current.spec_long_pct + '% / ' + current.spec_short_pct + '%' : current.lev_long_pct + '% / ' + current.lev_short_pct + '%'}</div>
+                            <div class="stat-value">${isLegacy ? current.spec_long_pct + '% / ' + current.spec_short_pct + '%' : current.lev_long_pct + '% / ' + current.lev_short_pct + '%'}</div>
                             <small class="text-muted">Long / Short</small>
                         </div>
                         <div class="stat-card">
