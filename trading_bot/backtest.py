@@ -256,6 +256,35 @@ def monte_carlo(trade_pnls, start_balance, n_sims=10000):
     }
 
 
+def _calc_adx(df, period=14):
+    """Calculate ADX(14) — trend strength indicator."""
+    if len(df) < period + 1:
+        return None
+    high = df["high"].values
+    low = df["low"].values
+    close = df["close"].values
+
+    tr = np.zeros(len(high))
+    plus_dm = np.zeros(len(high))
+    minus_dm = np.zeros(len(high))
+
+    for i in range(1, len(high)):
+        tr[i] = max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
+        up = high[i] - high[i-1]
+        down = low[i-1] - low[i]
+        plus_dm[i] = up if up > down and up > 0 else 0
+        minus_dm[i] = down if down > up and down > 0 else 0
+
+    # Wilder's smoothing
+    atr = pd.Series(tr).ewm(alpha=1/period, adjust=False).mean().values
+    plus_di = 100 * pd.Series(plus_dm).ewm(alpha=1/period, adjust=False).mean().values / atr
+    minus_di = 100 * pd.Series(minus_dm).ewm(alpha=1/period, adjust=False).mean().values / atr
+    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 0.0001)
+    adx = pd.Series(dx).ewm(alpha=1/period, adjust=False).mean().values
+
+    return float(adx[-1])
+
+
 def _make_trade(ap, exit_time, pair_name, result, exit_price, pnl, balance, bar_idx):
     return {
         "time": str(exit_time)[:19],
@@ -275,6 +304,7 @@ def _make_trade(ap, exit_time, pair_name, result, exit_price, pnl, balance, bar_
         "balance": round(balance, 2),
         "reason": ap.get("reason", ""),
         "score": ap.get("score", 0),
+        "regime": ap.get("regime", "neutral"),
         "_bar_idx": bar_idx,
     }
 
@@ -296,8 +326,8 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
         print(f"{'='*55}")
 
     mt5.connect()
-    all_d1 = mt5.get_candles(symbol, "D", 1200)
-    all_h4 = mt5.get_candles(symbol, "H4", 8000)
+    all_d1 = mt5.get_candles(symbol, "D", 3000)
+    all_h4 = mt5.get_candles(symbol, "H4", 20000)
     info = mt5.get_symbol_info(symbol)
     mt5.disconnect()
 
@@ -345,7 +375,7 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
             if ap["entry_bar"] >= i:
                 still_open.append(ap)
                 continue
-            # Check BE trigger
+            # Check BE trigger: H4 fractal breakout beyond entry
             if not ap["be_triggered"]:
                 vis_be = all_h4.iloc[:i + 1]
                 frac = _find_recent_fractal(vis_be, ap["direction"])
@@ -370,7 +400,8 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
                                                pnl, balance, i))
                     closed = True
                 elif bar["high"] >= ap["tp"]:
-                    pnl = ap["risk_amt"] * rr
+                    r_mult = abs(ap["tp"] - ap["entry"]) / abs(ap["entry"] - ap["sl"])
+                    pnl = ap["risk_amt"] * r_mult
                     balance += pnl
                     trades.append(_make_trade(ap, current_time, pair_name, "win",
                                                ap["tp"], pnl, balance, i))
@@ -385,7 +416,8 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
                                                pnl, balance, i))
                     closed = True
                 elif bar["low"] <= ap["tp"]:
-                    pnl = ap["risk_amt"] * rr
+                    r_mult = abs(ap["tp"] - ap["entry"]) / abs(ap["entry"] - ap["sl"])
+                    pnl = ap["risk_amt"] * r_mult
                     balance += pnl
                     trades.append(_make_trade(ap, current_time, pair_name, "win",
                                                ap["tp"], pnl, balance, i))
@@ -453,11 +485,51 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
         if pos.get("error"):
             continue
 
+        # --- Market regime detection via ADX(14) on D1 ---
+        adx = _calc_adx(d1_trend, 14)
+        default_rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
+
+        if is_forex:
+            trend_thresh, range_thresh = 20, 15  # EUR: lower ADX thresholds
+        else:
+            trend_thresh, range_thresh = 25, 20  # Gold
+
+        if adx is None:
+            regime = "neutral"
+        elif adx > trend_thresh:
+            regime = "trend"
+        elif adx < range_thresh:
+            regime = "range"
+        else:
+            regime = "neutral"
+
+        # Dynamic TP based on regime
+        if regime == "trend":
+            # ATR-based TP (wider in trends)
+            tp_mult = config.TP_ATR_MULT_FOREX if is_forex else config.TP_ATR_MULT
+            if atr_val and atr_val > 0:
+                if signal["direction"] == "BUY":
+                    tp_price = entry_price + atr_val * tp_mult
+                else:
+                    tp_price = entry_price - atr_val * tp_mult
+            else:
+                tp_price = pos["tp_price"]
+        elif regime == "range":
+            # 1:1 RR — quick scalp
+            sl_dist = abs(entry_price - sl)
+            if signal["direction"] == "BUY":
+                tp_price = entry_price + sl_dist * 1.0
+            else:
+                tp_price = entry_price - sl_dist * 1.0
+        else:
+            # Neutral — default fixed RR
+            tp_price = pos["tp_price"]
+
         active_positions.append({
             "entry_bar": i,
             "entry": entry_price,
             "sl": sl,
-            "tp": pos["tp_price"],
+            "tp": tp_price,
             "direction": signal["direction"],
             "risk_amt": pos["risk_amount"],
             "be_triggered": False,
@@ -466,6 +538,7 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
             "volume": pos["volume"],
             "reason": signal["reason"],
             "score": signal.get("score", 0),
+            "regime": regime,
         })
 
     # Close any remaining open positions at end of data
@@ -562,6 +635,10 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
 # ---------------------------------------------------------------------------
 
 PERIODS = [
+    ("2017", "2017-01-01", "2017-12-31"),
+    ("2018", "2018-01-01", "2018-12-31"),
+    ("2019", "2019-01-01", "2019-12-31"),
+    ("2020", "2020-01-01", "2020-12-31"),
     ("2021", "2021-01-01", "2021-12-31"),
     ("2022", "2022-01-01", "2022-12-31"),
     ("2023", "2023-01-01", "2023-12-31"),

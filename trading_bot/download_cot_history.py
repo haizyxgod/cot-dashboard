@@ -14,13 +14,13 @@ PAIRS_COT = {
     "GBP/USD": "GBP/USD",
 }
 
-START = "2020-01-01"
+START = "2016-01-01"
 END = "2026-05-27"
 
 result = {}
 for pair_name, cot_name in PAIRS_COT.items():
     print(f"\nDownloading {cot_name}...")
-    records = fetcher.fetch_historical_data(cot_name, START, END, limit=300)
+    records = fetcher.fetch_historical_data(cot_name, START, END, limit=600)
     if records:
         result[pair_name] = records
     else:

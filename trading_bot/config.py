@@ -21,8 +21,11 @@ PAIRS = {
 }
 
 # --- Risk ---
-RISK_RR = 1.7                # Default (Gold)
-RISK_RR_FOREX = 1.3          # EUR, GBP — lower volatility
+RISK_RR = 1.7                # Gold — fixed RR (fallback)
+RISK_RR_FOREX = 1.3          # EUR — fixed RR (fallback)
+# Dynamic TP via ATR (overrides RR when enabled)
+TP_ATR_MULT = 2.0            # Gold: TP = entry + ATR(14) * multiplier
+TP_ATR_MULT_FOREX = 1.5      # EUR
 HIGH_RISK_PCT = 2.0          # 3-4 variables aligned
 MID_RISK_PCT = 1.0           # 2 variables
 LOW_RISK_PCT = 0.5           # 1 variable (uncertainty)
