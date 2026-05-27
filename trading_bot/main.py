@@ -1,11 +1,14 @@
-"""COT + FVG Trading Bot v3 — FVG-first + COT filter + Trend + ATR SL.
+"""COT + FVG Trading Bot v4 — AUTO EXECUTION.
 
 Цепочка:
   1. FVG(D1+H4) задаёт направление
-  2. Trend (EMA50/200) валидирует
+  2. Trend (EMA50/200 Gold, EMA10/30 Forex) валидирует
   3. COT (CFTC report) фильтрует: блокирует против, усиливает совпадение
-  4. SL: H4 Fractal + ATR
-  5. Risk: 0.5% / 1% / 2% по числу совпавших переменных
+  4. ADX: market regime → adaptive TP (TREND=ATR, RANGE=1:1, NEUTRAL=default)
+  5. SL: H4 Fractal + ATR
+  6. AUTO EXECUTE → Telegram notification
+  7. BE monitor: fractal breakout → SL to entry
+  8. Pyramiding: new entry when all positions at BE
 """
 
 import sys
@@ -159,6 +162,23 @@ def register_be(ticket, symbol, entry_price, direction):
     print(f"[BE] Tracking #{ticket} {symbol} {direction} entry={entry_price}")
 
 
+def _notify_trade(pair, direction, entry, sl, tp, vol, risk_pct, reason, order_id):
+    """Send Telegram notification about executed trade."""
+    try:
+        from telegram_bot import send_text
+        emoji = "🟢" if direction == "BUY" else "🔴"
+        msg = (
+            f"{emoji} *{pair} {direction}* — ИСПОЛНЕН #{order_id}\n"
+            f"Вход: `{entry:.5f}`\n"
+            f"SL: `{sl:.5f}` | TP: `{tp:.5f}`\n"
+            f"Лот: *{vol}* | Риск: *{risk_pct}%*\n"
+            f"_{reason}_"
+        )
+        send_text(msg)
+    except Exception as e:
+        print(f"[TG] Notify error: {e}")
+
+
 def scan_all():
     """Главный цикл: FVG → Trend → COT → SL → сигнал."""
     print(f"\n[{datetime.now()}] === SCAN ===")
@@ -166,8 +186,6 @@ def scan_all():
     if not mt5.connect():
         print("  MT5 not connected")
         return
-
-    web_server.pending_signals.clear()
 
     open_positions = mt5.get_positions()
     occupied_symbols = {p["symbol"] for p in open_positions}
@@ -258,39 +276,44 @@ def scan_all():
                 print(f"  Risk err: {pos['error']}")
                 continue
 
-            sig_id = int(time.time() * 1000)
-            sig_data = {
-                "pair": pair_name,
-                "direction": signal["direction"],
-                "d1_fvg": signal["d1_fvg"],
-                "h4_fvg": signal["h4_fvg"],
-                "cot_text": cot.get("text", "N/A"),
-                "entry_price": entry,
-                "sl_price": pos["sl_price"],
-                "tp_price": pos["tp_price"],
-                "volume": pos["volume"],
-                "risk_pct": signal["risk_pct"],
-                "reason": signal["reason"],
-                "time": str(datetime.now()),
-            }
-            web_server.pending_signals[sig_id] = sig_data
+            # --- AUTO EXECUTE ---
+            result = mt5.place_market_order(
+                symbol, signal["direction"],
+                float(pos["sl_price"]), float(pos["tp_price"]),
+                float(pos["volume"])
+            )
+
+            if result is None:
+                print(f"  [AUTO] ORDER FAILED: {pair_name} {signal['direction']}")
+                continue
+
+            order_id = result.get("order", "?")
+            register_be(order_id, symbol, entry, signal["direction"])
             last_signal_sent[pair_name] = time.time()
-            print(f"  [WEB] Signal #{sig_id}: {sig_data['pair']} {sig_data['direction']} "
-                  f"vol={sig_data['volume']}")
+
+            print(f"  [AUTO] #{order_id} {pair_name} {signal['direction']} "
+                  f"Entry={entry:.5f} SL={pos['sl_price']} TP={pos['tp_price']} "
+                  f"Lot={pos['volume']}")
+
+            # Telegram notification
+            _notify_trade(pair_name, signal["direction"], entry,
+                          pos["sl_price"], pos["tp_price"],
+                          pos["volume"], signal["risk_pct"],
+                          signal["reason"], order_id)
 
         except Exception as e:
             print(f"  [ERR] {pair_name}: {e}")
             import traceback; traceback.print_exc()
 
-    print(f"[{datetime.now()}] === END ({len(web_server.pending_signals)} signals) ===\n")
+    print(f"[{datetime.now()}] === END ===\n")
 
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("COT + FVG Bot v3 (FVG-first + COT filter)")
+    print("COT + FVG Bot v4 — AUTO MODE")
     print(f"Server: {config.MT5_SERVER}")
     print(f"Pairs: {list(config.PAIRS.keys())}")
-    print(f"UI: http://localhost:5002/bot")
+    print(f"UI: http://localhost:5002/bot (monitoring)")
     print("=" * 50)
 
     web_server.start_web()
