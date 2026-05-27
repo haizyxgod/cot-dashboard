@@ -38,4 +38,5 @@ TRIGGER_SCAN_SEC = 900    # Re-check trigger every 15 min
 
 # --- Schedule ---
 SCAN_INTERVAL_MINUTES = 180  # Every 3 hours (COT+D1 check)
-MIN_BARS_BETWEEN_TRADES = 6  # H4 bars (24h) between trades on same pair
+MIN_BARS_BETWEEN_TRADES = 3  # H4 bars (12h)
+MAX_POSITIONS_PER_PAIR = 2   # max concurrent per pair

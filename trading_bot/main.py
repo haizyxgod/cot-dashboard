@@ -282,6 +282,8 @@ def scan_all():
         symbol_positions = [p for p in open_positions if p["symbol"] == symbol]
         if not symbol_positions:
             return True
+        if len(symbol_positions) >= getattr(config, 'MAX_POSITIONS_PER_PAIR', 2):
+            return False
         for p in symbol_positions:
             ticket = p["ticket"]
             info = be_tracked.get(ticket, {})

@@ -338,8 +338,8 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
         print(f"{'='*55}")
 
     mt5.connect()
-    all_d1 = mt5.get_candles(symbol, "D", 3000)
-    all_h4 = mt5.get_candles(symbol, "H4", 20000)
+    all_d1 = mt5.get_candles(symbol, "D", 5000)
+    all_h4 = mt5.get_candles(symbol, "H4", 40000)
     info = mt5.get_symbol_info(symbol)
     mt5.disconnect()
 
@@ -447,6 +447,9 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
             continue
 
         if active_positions:
+            if len(active_positions) >= getattr(config, 'MAX_POSITIONS_PER_PAIR', 2):
+                skip_be_wait += 1
+                continue
             # Check if all positions are at BE
             all_be = all(p["be_triggered"] for p in active_positions)
             if not all_be:
@@ -643,10 +646,310 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
 
 
 # ---------------------------------------------------------------------------
+# H1 Backtest variant
+# ---------------------------------------------------------------------------
+
+def backtest_pair_h1(symbol, pair_name, start_balance=10000, cot_signals=None,
+                     start_date=None, end_date=None, verbose=True):
+    """H1 version — same strategy, faster timeframe."""
+    is_forex = pair_name in ("EUR/USD", "GBP/USD", "USD/JPY")
+    rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
+    cooldown_bars = 24  # 24h on H1
+
+    if verbose:
+        print(f"\n{'='*55}")
+        print(f"  BACKTEST H1: {pair_name} ({symbol})")
+        print(f"  RR: {rr}  |  Cooldown: {cooldown_bars} bars (24h)")
+        print(f"{'='*55}")
+
+    mt5.connect()
+    all_d1 = mt5.get_candles(symbol, "D", 3000)
+    all_h1 = mt5.get_candles(symbol, "H1", 50000)
+    info = mt5.get_symbol_info(symbol)
+    mt5.disconnect()
+
+    if all_d1.empty or all_h1.empty:
+        print(f"  [SKIP] No data")
+        return [], {}, start_balance
+
+    pt = info["point"] if info else (0.001 if "JPY" in symbol else 0.00001 if is_forex else 0.01)
+    cs = info["trade_contract_size"] if info else (100000 if is_forex else 100)
+    tv = info["trade_tick_value"] if info else 0
+
+    all_d1 = all_d1.sort_values("time").reset_index(drop=True)
+    all_h1 = all_h1.sort_values("time").reset_index(drop=True)
+
+    if start_date:
+        all_d1 = all_d1[all_d1["time"] >= pd.Timestamp(start_date)]
+        all_h1 = all_h1[all_h1["time"] >= pd.Timestamp(start_date)]
+    if end_date:
+        all_d1 = all_d1[all_d1["time"] <= pd.Timestamp(end_date)]
+        all_h1 = all_h1[all_h1["time"] <= pd.Timestamp(end_date)]
+    all_d1 = all_d1.reset_index(drop=True)
+    all_h1 = all_h1.reset_index(drop=True)
+
+    if verbose:
+        print(f"  D1: {len(all_d1)} | H1: {len(all_h1)} bars")
+
+    balance = start_balance
+    trades = []
+    active_positions = []
+
+    skip_cot = 0; skip_fvg = 0; skip_trend = 0
+    skip_fractal = 0; skip_cooldown = 0; skip_no_trade = 0
+    skip_be_wait = 0
+
+    for i in range(200, len(all_h1)):
+        current_time = all_h1.iloc[i]["time"]
+
+        # --- Process active positions ---
+        still_open = []
+        for ap in active_positions:
+            if ap["entry_bar"] >= i:
+                still_open.append(ap)
+                continue
+            if not ap["be_triggered"]:
+                vis_be = all_h1.iloc[:i + 1]
+                frac = _find_recent_fractal(vis_be, ap["direction"])
+                if frac is not None:
+                    if ap["direction"] == "BUY" and frac > ap["entry"]:
+                        ap["be_triggered"] = True
+                        ap["current_sl"] = ap["entry"]
+                    elif ap["direction"] == "SELL" and frac < ap["entry"]:
+                        ap["be_triggered"] = True
+                        ap["current_sl"] = ap["entry"]
+
+            sl_check = ap["entry"] if ap["be_triggered"] else ap["sl"]
+            bar = all_h1.iloc[i]
+            closed = False
+            if ap["direction"] == "BUY":
+                if bar["low"] <= sl_check:
+                    result = "be" if ap["be_triggered"] else "loss"
+                    pnl = 0.0 if result == "be" else -ap["risk_amt"]
+                    balance += pnl
+                    trades.append(_make_trade(ap, current_time, pair_name, result,
+                                               sl_check if result == "be" else ap["sl"],
+                                               pnl, balance, i))
+                    closed = True
+                elif bar["high"] >= ap["tp"]:
+                    r_mult = abs(ap["tp"] - ap["entry"]) / abs(ap["entry"] - ap["sl"])
+                    pnl = ap["risk_amt"] * r_mult
+                    balance += pnl
+                    trades.append(_make_trade(ap, current_time, pair_name, "win",
+                                               ap["tp"], pnl, balance, i))
+                    closed = True
+            else:
+                if bar["high"] >= sl_check:
+                    result = "be" if ap["be_triggered"] else "loss"
+                    pnl = 0.0 if result == "be" else -ap["risk_amt"]
+                    balance += pnl
+                    trades.append(_make_trade(ap, current_time, pair_name, result,
+                                               sl_check if result == "be" else ap["sl"],
+                                               pnl, balance, i))
+                    closed = True
+                elif bar["low"] <= ap["tp"]:
+                    r_mult = abs(ap["tp"] - ap["entry"]) / abs(ap["entry"] - ap["sl"])
+                    pnl = ap["risk_amt"] * r_mult
+                    balance += pnl
+                    trades.append(_make_trade(ap, current_time, pair_name, "win",
+                                               ap["tp"], pnl, balance, i))
+                    closed = True
+            if not closed:
+                still_open.append(ap)
+        active_positions = still_open
+
+        # --- Entry gates ---
+        d1_trend = all_d1[all_d1["time"] <= current_time].tail(250)
+        d1_fvg_data = all_d1[all_d1["time"] <= current_time].tail(20)
+        h1_vis = all_h1.iloc[:i + 1].tail(100)
+
+        if len(d1_fvg_data) < 10 or len(h1_vis) < 50:
+            continue
+
+        if active_positions:
+            if len(active_positions) >= getattr(config, 'MAX_POSITIONS_PER_PAIR', 2):
+                skip_be_wait += 1
+                continue
+            all_be = all(p["be_triggered"] for p in active_positions)
+            if not all_be:
+                skip_be_wait += 1
+                continue
+            last_entry = max(p["entry_bar"] for p in active_positions)
+            if (i - last_entry) < cooldown_bars:
+                skip_cooldown += 1
+                continue
+        else:
+            if trades:
+                last_close = max(t["_bar_idx"] for t in trades if t["pair"] == pair_name)
+                if (i - last_close) < cooldown_bars:
+                    skip_cooldown += 1
+                    continue
+
+        # --- FVG on D1+H1 ---
+        # Build H4 candles from H1 for the FVG check (H4 = 4xH1 bars)
+        h4_vis = _h1_to_h4(h1_vis)
+        fvg = check_fvg_signals(d1_fvg_data, h4_vis)
+        if not fvg["direction"]:
+            # Also try pure H1 FVG
+            fvg_h1 = check_fvg_signals(d1_fvg_data, h1_vis)
+            if not fvg_h1["direction"]:
+                skip_fvg += 1
+                continue
+            fvg = fvg_h1
+
+        target_date = str(current_time)[:10]
+        cot = get_cot_at_date(cot_signals, pair_name, target_date)
+        trend = check_daily_trend(d1_trend, pair_name)
+
+        signal = evaluate_setup(fvg, cot, trend)
+        if not signal["trade"]:
+            state = signal.get("state", "")
+            if state == "cot_opposed": skip_cot += 1
+            elif state == "trend_opposed": skip_trend += 1
+            else: skip_no_trade += 1
+            continue
+
+        entry_price = all_h1.iloc[i]["close"]
+
+        # ADX regime (D1)
+        adx = _calc_adx(d1_trend, 14)
+        if is_forex:
+            trend_thresh, range_thresh = 20, 15
+        else:
+            trend_thresh, range_thresh = 25, 20
+
+        if adx is None: regime = "neutral"
+        elif adx > trend_thresh: regime = "trend"
+        elif adx < range_thresh: regime = "range"
+        else: regime = "neutral"
+
+        # SL: H1 fractal + H1 ATR
+        atr_val = calculate_atr(h1_vis, 14)
+        sl = nearest_fractal(h1_vis, signal["fvg_direction"], entry_price,
+                             atr_value=atr_val)
+        if sl is None:
+            skip_fractal += 1
+            continue
+
+        pos = calculate_lot(balance, entry_price, sl, signal["risk_pct"],
+                            pair_name, pt, cs, tv, rr=rr)
+        if pos.get("error"):
+            continue
+
+        # TP
+        if regime == "trend":
+            tp_mult = config.TP_ATR_MULT_FOREX if is_forex else config.TP_ATR_MULT
+            if atr_val and atr_val > 0:
+                if signal["direction"] == "BUY":
+                    tp_price = entry_price + atr_val * tp_mult
+                else:
+                    tp_price = entry_price - atr_val * tp_mult
+            else:
+                tp_price = pos["tp_price"]
+        elif regime == "range":
+            sl_dist = abs(entry_price - sl)
+            if signal["direction"] == "BUY":
+                tp_price = entry_price + sl_dist * 1.0
+            else:
+                tp_price = entry_price - sl_dist * 1.0
+        else:
+            tp_price = pos["tp_price"]
+
+        active_positions.append({
+            "entry_bar": i, "entry": entry_price, "sl": sl, "tp": tp_price,
+            "direction": signal["direction"], "risk_amt": pos["risk_amount"],
+            "be_triggered": False, "current_sl": sl,
+            "risk_pct": signal["risk_pct"], "volume": pos["volume"],
+            "reason": signal["reason"], "score": signal.get("score", 0),
+            "regime": regime,
+        })
+
+    for ap in active_positions:
+        result = "be" if ap["be_triggered"] else "open"
+        pnl = 0.0
+        trades.append(_make_trade(ap, all_h1.iloc[-1]["time"], pair_name, result,
+                                   ap["entry"], pnl, balance, ap["entry_bar"]))
+
+    if not trades:
+        return [], {}, start_balance
+
+    df = pd.DataFrame(trades)
+    closed = df[df["result"].isin(("win", "loss", "be"))]
+    wins = closed[closed["result"] == "win"]
+    losses = closed[closed["result"] == "loss"]
+    bes = closed[closed["result"] == "be"]
+    opens = df[df["result"] == "open"]
+
+    total_trades = len(df)
+    wins_n = len(wins); losses_n = len(losses); bes_n = len(bes); opens_n = len(opens)
+    wr = wins_n / (wins_n + losses_n) * 100 if (wins_n + losses_n) > 0 else 0
+    total_pnl = df["pnl"].sum()
+    final_balance = balance
+
+    peak = start_balance; max_dd_pct = 0.0
+    for bal in df["balance"]:
+        if bal > peak: peak = bal
+        dd_pct = (peak - bal) / peak * 100
+        if dd_pct > max_dd_pct: max_dd_pct = dd_pct
+
+    avg_win = wins["pnl"].mean() if wins_n > 0 else 0
+    avg_loss = abs(losses["pnl"].mean()) if losses_n > 0 else 0
+    pf = (wins["pnl"].sum() / abs(losses["pnl"].sum())) if losses_n > 0 and losses["pnl"].sum() != 0 else float("inf")
+
+    adv = compute_advanced_metrics(df, start_balance)
+
+    stats = {
+        "pair": pair_name, "symbol": symbol,
+        "start_balance": start_balance,
+        "final_balance": round(final_balance, 2),
+        "total_pnl": round(total_pnl, 2),
+        "total_return_pct": round((final_balance - start_balance) / start_balance * 100, 2),
+        "total_trades": total_trades, "wins": wins_n, "losses": losses_n,
+        "be": bes_n, "open": opens_n, "win_rate": round(wr, 1),
+        "avg_win": round(avg_win, 2), "avg_loss": round(avg_loss, 2),
+        "profit_factor": round(pf, 2) if pf != float("inf") else "inf",
+        "max_drawdown_pct": round(max_dd_pct, 2),
+        "best_trade": round(df["pnl"].max(), 2),
+        "worst_trade": round(df["pnl"].min(), 2),
+        "cot_blocked": skip_cot,
+        **adv,
+    }
+
+    if verbose:
+        print(f"  Trades: {total_trades} | Win:{wins_n} Loss:{losses_n} BE:{bes_n} | WR:{wr:.1f}%")
+        print(f"  P&L: ${total_pnl:+,.2f} | DD: {max_dd_pct:.1f}% | Sharpe: {adv.get('sharpe',0):.2f}")
+        print(f"  Skipped: COT={skip_cot} FVG={skip_fvg} Trend={skip_trend} "
+              f"NoTrade={skip_no_trade} Fractal={skip_fractal} "
+              f"Cooldown={skip_cooldown} BE-wait={skip_be_wait}")
+
+    return trades, stats, final_balance
+
+
+def _h1_to_h4(df_h1):
+    """Resample H1 to H4 candles for FVG check."""
+    if df_h1.empty:
+        return df_h1
+    df = df_h1.copy()
+    df["time"] = pd.to_datetime(df["time"])
+    df = df.set_index("time")
+    h4 = df.resample("4h").agg({
+        "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"
+    }).dropna()
+    return h4.reset_index().rename(columns={"index": "time"})
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 PERIODS = [
+    ("2010", "2010-01-01", "2010-12-31"),
+    ("2011", "2011-01-01", "2011-12-31"),
+    ("2012", "2012-01-01", "2012-12-31"),
+    ("2013", "2013-01-01", "2013-12-31"),
+    ("2014", "2014-01-01", "2014-12-31"),
+    ("2015", "2015-01-01", "2015-12-31"),
+    ("2016", "2016-01-01", "2016-12-31"),
     ("2017", "2017-01-01", "2017-12-31"),
     ("2018", "2018-01-01", "2018-12-31"),
     ("2019", "2019-01-01", "2019-12-31"),
