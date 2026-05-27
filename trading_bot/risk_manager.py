@@ -1,50 +1,52 @@
-"""Risk Manager — расчёт размера позиции на основе фрактального SL."""
-
+"""Risk Manager — pair-aware lot sizing (MT5)."""
 import config
 
 
-def calculate_position(balance, entry_price, sl_price, risk_pct, pair):
+def calculate_lot(balance, entry_price, sl_price, risk_pct, pair,
+                 point, contract_size, tick_value=None, rr=None):
     """
-    Вычисляет размер позиции в юнитах.
-
-    balance: баланс счёта
-    entry_price: цена входа
-    sl_price: уровень стоп-лосса
-    risk_pct: % риска (например 2.0 = 2%)
-    pair: ключ из config.PAIRS (для определения pip value)
-
-    Returns: dict
+    point: symbol_info.point
+    contract_size: symbol_info.trade_contract_size
+    tick_value: symbol_info.trade_tick_value
+    rr: Risk:Reward (default: pair-specific from config)
     """
-    sl_pips_abs = abs(entry_price - sl_price)
+    if rr is None:
+        rr = config.RISK_RR_FOREX if _is_forex(pair) else config.RISK_RR
+
+    sl_distance = abs(entry_price - sl_price)
+    if sl_distance == 0:
+        return {"volume": 0, "error": "SL equals entry"}
+
     risk_amount = balance * (risk_pct / 100)
+    sl_points = sl_distance / point
 
-    # Для валютных пар (EUR/USD, GBP/USD)
-    # 1 pip = 0.0001, кроме JPY (0.01) и XAU (0.01 = $0.10 per 0.01 move)
-    if "JPY" in pair:
-        pip_size = 0.01
-    elif "XAU" in pair:
-        pip_size = 0.01  # 1 pip on XAU/USD = $0.10 per unit
+    if tick_value and tick_value > 0:
+        sl_value_per_lot = sl_points * tick_value
     else:
-        pip_size = 0.0001
+        sl_value_per_lot = sl_distance * contract_size
 
-    sl_pips = sl_pips_abs / pip_size
+    if sl_value_per_lot <= 0:
+        return {"volume": 0, "error": "Zero SL value"}
 
-    if sl_pips == 0:
-        return {"units": 0, "error": "SL равен цене входа — невозможно рассчитать"}
+    volume = risk_amount / sl_value_per_lot
+    volume = round(volume, 2)
+    volume = max(0.01, volume)
 
-    # Pip value: для стандартного лота (100,000 units) = $10/pip
-    # Для XAU: 1 unit двигается на $0.10 при изменении на 0.01
-    if "XAU" in pair:
-        units = risk_amount / (sl_pips_abs * 10)
+    tp_distance = sl_distance * rr
+    if entry_price > sl_price:
+        tp_price = entry_price + tp_distance
     else:
-        units = risk_amount / (sl_pips * 0.0001)
+        tp_price = entry_price - tp_distance
 
     return {
-        "units": int(units),
-        "sl_pips": round(sl_pips, 1),
+        "volume": volume,
+        "sl_points": round(sl_points, 1),
         "risk_amount": round(risk_amount, 2),
         "sl_price": round(sl_price, 5),
-        "tp_price": round(entry_price + (entry_price - sl_price) * config.RISK_RR, 5)
-        if entry_price > sl_price
-        else round(entry_price - (sl_price - entry_price) * config.RISK_RR, 5),
+        "tp_price": round(tp_price, 5),
+        "rr": rr,
     }
+
+
+def _is_forex(pair):
+    return pair in ("EUR/USD", "GBP/USD")

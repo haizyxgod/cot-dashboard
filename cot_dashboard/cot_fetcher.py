@@ -91,6 +91,43 @@ class COTDataFetcher:
             print(f"Ошибка при получении данных для {instrument_name}: {e}")
             return None
 
+    def fetch_historical_data(self, instrument_name, start_date, end_date, limit=500):
+        """Получает исторические COT-данные за диапазон дат.
+
+        start_date / end_date: строки 'YYYY-MM-DD'
+        limit: макс. число записей (default 500 = ~10 лет)
+        """
+        config = self.instruments[instrument_name]
+        url = f"{self.base_url}{config['dataset']}"
+        where = (
+            f"cftc_contract_market_code='{config['code']}'"
+            f" AND report_date_as_yyyy_mm_dd >= '{start_date}'"
+            f" AND report_date_as_yyyy_mm_dd <= '{end_date}'"
+        )
+        params = {
+            '$where': where,
+            '$order': 'report_date_as_yyyy_mm_dd ASC',
+            '$limit': limit,
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data:
+                print(f"  [COT] No historical data for {instrument_name}")
+                return []
+            results = []
+            for record in data:
+                parsed = self._parse_record(record, config['type'], instrument_name)
+                if parsed:
+                    results.append(parsed)
+            print(f"  [COT] {instrument_name}: {len(results)} records "
+                  f"({results[0]['date']} -> {results[-1]['date']})")
+            return results
+        except Exception as e:
+            print(f"  [COT] Error fetching history for {instrument_name}: {e}")
+            return []
+
     def _parse_record(self, record, data_type, instrument_name):
         """Парсит запись в зависимости от типа данных"""
         result = {
