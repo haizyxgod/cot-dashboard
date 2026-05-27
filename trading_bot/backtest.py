@@ -66,11 +66,23 @@ def load_cot_history():
             else:
                 sig = "neutral"; score = 0
 
+            direction = "bullish" if "bull" in sig else "bearish" if "bear" in sig else "neutral"
+
+            # JPY pairs: COT tracks JPY futures → invert
+            # leveraged_net > 0 = long JPY = BEARISH USD/JPY
+            if "JPY" in pair_name:
+                if direction == "bullish":
+                    direction = "bearish"
+                    sig = "strong_bearish" if "strong" in sig else "bearish"
+                elif direction == "bearish":
+                    direction = "bullish"
+                    sig = "strong_bullish" if "strong" in sig else "bullish"
+
             signals.append({
                 "date": rec["date"],
                 "signal": sig,
                 "score": score,
-                "direction": "bullish" if "bull" in sig else "bearish" if "bear" in sig else "neutral",
+                "direction": direction,
                 "text": f"COT {sig} (net={net:+,})",
             })
         cot_signals[pair_name] = signals
@@ -315,7 +327,7 @@ def _make_trade(ap, exit_time, pair_name, result, exit_price, pnl, balance, bar_
 
 def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
                   start_date=None, end_date=None, verbose=True):
-    is_forex = pair_name in ("EUR/USD", "GBP/USD")
+    is_forex = pair_name in ("EUR/USD", "GBP/USD", "USD/JPY")
     rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
 
     if verbose:

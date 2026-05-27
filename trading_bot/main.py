@@ -43,7 +43,8 @@ except ImportError:
 def get_cot_verdict(pair_name):
     if not COT_AVAILABLE:
         return {"signal": "N/A", "score": 0, "direction": "neutral", "text": "COT недоступен"}
-    mapping = {"XAU/USD": "XAU (Золото)", "EUR/USD": "EUR/USD", "GBP/USD": "GBP/USD"}
+    mapping = {"XAU/USD": "XAU (Золото)", "EUR/USD": "EUR/USD",
+               "GBP/USD": "GBP/USD", "USD/JPY": "USD/JPY"}
     cot_key = mapping.get(pair_name)
     if not cot_key:
         return {"signal": "N/A", "score": 0, "direction": "neutral", "text": "Нет данных"}
@@ -55,10 +56,22 @@ def get_cot_verdict(pair_name):
         if not analysis:
             return {"signal": "N/A", "score": 0, "direction": "neutral", "text": "Ошибка"}
         v = analysis.get("verdict", {})
+
+        signal = v.get("signal", "neutral")
+        direction = analysis.get("sentiment", {}).get("direction", "neutral")
+
+        # JPY COT inversion: COT tracks JPY futures → flip direction
+        if "JPY" in pair_name:
+            inv = {"bullish": "bearish", "bearish": "bullish",
+                   "strong_bullish": "strong_bearish",
+                   "strong_bearish": "strong_bullish"}
+            signal = inv.get(signal, signal)
+            direction = inv.get(direction, direction)
+
         return {
-            "signal": v.get("signal", "neutral"),
+            "signal": signal,
             "score": v.get("score", 0),
-            "direction": analysis.get("sentiment", {}).get("direction", "neutral"),
+            "direction": direction,
             "text": v.get("text", "N/A"),
         }
     except Exception as e:

@@ -12,7 +12,7 @@ def check_daily_trend(df_d1, pair_name=None):
     pair_name: 'XAU/USD', 'EUR/USD', etc.
     Returns: 'bullish' | 'bearish' | 'neutral'
     """
-    if pair_name and "EUR" in pair_name:
+    if pair_name and ("EUR" in pair_name or "JPY" in pair_name):
         fast, slow = 10, 30
         threshold = 0.3  # tighter for shorter EMAs
     else:

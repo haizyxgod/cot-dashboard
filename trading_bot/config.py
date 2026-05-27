@@ -17,7 +17,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # MT5 symbol names
 PAIRS = {
     "XAU/USD": "GOLD.pro",
-    "EUR/USD": "EURUSD.pro",
+    "USD/JPY": "USDJPY.pro",
 }
 
 # --- Risk ---
