@@ -1,6 +1,9 @@
-"""Web UI — компактные сигналы, позиции, история."""
+"""Web Dashboard v3 — equity graph, monthly P&L, CSV export, theme, mobile."""
 import threading
-from flask import Flask, render_template_string, jsonify, request
+import io
+import csv
+from datetime import datetime
+from flask import Flask, render_template_string, jsonify, request, Response
 from flask_cors import CORS
 import db as database
 
@@ -8,62 +11,98 @@ app = Flask(__name__)
 CORS(app)
 
 pending_signals = {}
-
-# Init DB
 database.init()
 
-HTML = """<!DOCTYPE html>
-<html lang="ru">
+bot_state = {"last_scan": None, "scan_result": "", "mt5_connected": False}
+log_entries = []
+
+def add_log(msg):
+    log_entries.insert(0, {"time": datetime.now().strftime("%H:%M:%S"), "msg": msg})
+    if len(log_entries) > 200: log_entries.pop()
+
+HTML = r"""<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="60">
-    <title>FIN Trading Bot</title>
-    <style>
-        * { box-sizing:border-box; margin:0; padding:0; }
-        body { background:#0d0d0d; color:#ccc; font-family:system-ui,sans-serif; padding:16px; }
-        .container { max-width:700px; margin:0 auto; }
-        .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid #222; }
-        .header h1 { font-size:1.2rem; color:#fff; }
-        .dot { width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px; background:#00e676; animation:pulse 2s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
-        .nav { display:flex; gap:14px; margin-bottom:14px; }
-        .nav a { color:#666; text-decoration:none; font-size:0.85rem; font-weight:600; }
-        .nav a:hover,.nav a.active { color:#fff; }
-        .msg { padding:8px 14px; border-radius:6px; margin:10px 0; font-size:0.85rem; }
-        .msg-ok { background:#0d3320; color:#00e676; border:1px solid #1a4d32; }
-        .msg-err { background:#330d0d; color:#ff5252; border:1px solid #4d1a1a; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FIN Bot</title>
+<style>
+    :root{--bg:#0d1117;--bg2:#161b22;--border:#21262d;--text:#8b949e;--head:#c9d1d9;--muted:#484f58;--sub:#6e7681}
+    [data-theme="light"]{--bg:#f6f8fa;--bg2:#fff;--border:#d0d7de;--text:#57606a;--head:#1f2328;--muted:#8b949e;--sub:#656d76}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;padding:12px;min-height:100vh}
+    .container{max-width:960px;margin:0 auto}
+    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px}
+    .header h1{font-size:1.1rem;color:var(--head)}
+    .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+    .status-dot.online{background:#00e676;animation:pulse 2s infinite}
+    .status-dot.offline{background:#ff5252}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.1}}
+    .nav{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+    .nav a{color:var(--muted);text-decoration:none;font-size:0.8rem;font-weight:600;padding:4px 0;border-bottom:2px solid transparent}
+    .nav a:hover,.nav a.active{color:var(--head);border-bottom-color:#00e676}
+    .theme-btn{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.7rem}
 
-        /* Signal row */
-        .sig { background:#141414; border-radius:8px; padding:10px 14px; margin:8px 0; display:flex; align-items:center; gap:12px; border-left:3px solid #333; }
-        .sig.buy { border-left-color:#00e676; }
-        .sig.sell { border-left-color:#ff5252; }
-        .sig .dir { font-weight:700; font-size:0.9rem; min-width:50px; }
-        .sig .dir.buy-c { color:#00e676; }
-        .sig .dir.sell-c { color:#ff5252; }
-        .sig .info { flex:1; font-size:0.75rem; color:#888; }
-        .sig .info span { color:#aaa; font-weight:600; }
-        .sig .prices { font-size:0.8rem; text-align:right; min-width:90px; }
-        .sig .prices .sl { color:#ff5252; }
-        .sig .prices .tp { color:#00e676; }
-        .sig .act { display:flex; gap:4px; }
-        .sig .act button { padding:5px 10px; border:none; border-radius:4px; font-size:0.7rem; font-weight:700; cursor:pointer; color:#fff; }
-        .btn-ok { background:#00c853; }
-        .btn-no { background:transparent; border:1px solid #ff5252!important; color:#ff5252!important; }
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+    .card{background:var(--bg2);border-radius:10px;padding:12px 14px;border:1px solid var(--border)}
+    .card .label{font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+    .card .value{font-size:1.2rem;font-weight:700;color:var(--head);margin-top:2px}
+    .card .sub{font-size:0.65rem;color:var(--sub);margin-top:2px}
+    .val-green{color:#00e676!important}.val-red{color:#ff5252!important}.val-gold{color:#ffab00!important}
 
-        /* Positions */
-        .pos { background:#141414; border-radius:8px; padding:10px 14px; margin:6px 0; display:flex; align-items:center; gap:12px; }
-        .pos .pnl-pos { color:#00e676; }
-        .pos .pnl-neg { color:#ff5252; }
+    .section-title{font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px}
+    .pos-row{background:var(--bg2);border-radius:10px;padding:14px 16px;margin:8px 0;display:flex;align-items:center;gap:12px;border:1px solid var(--border);font-size:0.9rem;flex-wrap:wrap}
+    .pos-row .pair{font-weight:700;min-width:70px;color:var(--head);font-size:0.95rem}
+    .pos-row .dir{min-width:65px;font-size:0.8rem}
+    .dir.buy{color:#00e676}.dir.sell{color:#ff5252}
+    .pos-row .info{flex:1;font-size:0.78rem;color:var(--sub);min-width:200px}
+    .pos-row .info span{color:var(--text)}
+    .pos-row .pnl{font-weight:700;min-width:85px;text-align:right;font-size:0.95rem}
+    .pnl.pos{color:#00e676}.pnl.neg{color:#ff5252}
+    .be-badge{font-size:0.7rem;padding:3px 8px;border-radius:4px;font-weight:700}
+    .be-active{background:#1a3a2a;color:#00e676}.be-waiting{background:#3a2a1a;color:#ffab00}
+    .sl-tp{font-size:0.68rem;color:var(--muted);margin-top:3px}
 
-        /* History */
-        .hist { background:#141414; border-radius:8px; padding:10px 14px; margin:6px 0; font-size:0.8rem; }
-        .hist .tag { font-size:0.65rem; padding:2px 6px; border-radius:3px; }
-        .tag-exec { background:#00c853; color:#000; }
-        .tag-rej { background:#ff5252; color:#fff; }
+    .dow-bar{flex:1;text-align:center;background:var(--bg2);border-radius:8px;padding:8px 4px;border:1px solid var(--border);min-width:40px}
+    .dow-bar .label{font-size:0.65rem;color:var(--muted)}
+    .dow-bar .bar{height:24px;border-radius:3px;margin:4px 0;min-width:100%;transition:height 0.5s}
+    .dow-bar .val{font-size:0.6rem;color:var(--sub)}
+    .bar-pos{background:linear-gradient(to top,#00e67644,#00e676)}.bar-neg{background:linear-gradient(to bottom,#ff525244,#ff5252)}.bar-zero{background:var(--border)}
 
-        .empty { text-align:center; padding:40px; color:#555; }
-    </style>
+    .monthly-table{width:100%;font-size:0.72rem;border-collapse:collapse;margin-bottom:12px}
+    .monthly-table th,.monthly-table td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)}
+    .monthly-table th{color:var(--muted);font-weight:600;font-size:0.65rem;text-transform:uppercase}
+    .monthly-table td:first-child{text-align:left;color:var(--text)}
+    .monthly-table .pnl-pos{color:#00e676}.monthly-table .pnl-neg{color:#ff5252}
+
+    .hist-entry{background:var(--bg2);border-radius:8px;padding:8px 13px;margin:4px 0;font-size:0.78rem;display:flex;align-items:center;gap:10px;border:1px solid var(--border);flex-wrap:wrap}
+    .hist-entry .tag{font-size:0.6rem;padding:2px 6px;border-radius:3px;font-weight:700;min-width:55px;text-align:center}
+    .tag-win{background:#0d3320;color:#00e676}.tag-loss{background:#330d0d;color:#ff5252}.tag-be{background:var(--bg2);color:var(--sub)}
+
+    .filter-row{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+    .filter-row select,.filter-row input{padding:6px 10px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:0.75rem}
+    .filter-row select:focus,.filter-row input:focus{outline:none;border-color:#00e676}
+    .btn{padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:0.75rem;font-weight:700;text-decoration:none;display:inline-block}
+    .btn-ok{background:#00c853;color:#fff}.btn-out{background:var(--bg2);color:var(--text);border:1px solid var(--border)}
+
+    canvas{max-width:100%;margin:8px 0}
+
+    .log-entry{font-size:0.72rem;padding:4px 0;border-bottom:1px solid var(--border);display:flex;gap:10px}
+    .log-time{color:var(--muted);min-width:50px}.log-msg{color:var(--sub)}.log-msg .hl{color:var(--head)}
+    .empty{text-align:center;padding:30px;color:var(--muted)}
+    .toast{position:fixed;top:16px;right:16px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;z-index:999;min-width:220px;box-shadow:0 8px 24px rgba(0,0,0,0.4);animation:slideIn 0.3s ease}
+    .toast-ok{border-left:3px solid #00e676}.toast-err{border-left:3px solid #ff5252}
+    .toast .t-title{font-size:0.85rem;color:var(--head);font-weight:600}
+    .toast .t-body{font-size:0.72rem;color:var(--sub);margin-top:2px}
+    @keyframes slideIn{from{transform:translateX(120%)}to{transform:translateX(0)}}
+    .refresh-note{font-size:0.65rem;color:var(--muted);text-align:center;margin-top:12px}
+
+    @media(max-width:600px){
+        .cards{grid-template-columns:repeat(2,1fr)}
+        .header h1{font-size:1rem}
+        .pos-row .info{min-width:150px;font-size:0.68rem}
+    }
+</style>
 </head>
 <body>
 <div class="container">
@@ -71,131 +110,716 @@ HTML = """<!DOCTYPE html>
 <div class="header">
     <div>
         <h1>FIN Trading Bot</h1>
-        <span style="font-size:0.7rem;color:#666">След. сканирование: <b id="timer">--:--</b></span>
+        <span style="font-size:0.7rem;color:var(--muted)">
+            <span class="status-dot {{ 'online' if state.mt5_connected else 'offline' }}"></span>
+            {{ 'MT5 Online' if state.mt5_connected else 'MT5 Offline' }}
+            &nbsp;|&nbsp; Скан: <b id="next-scan">--</b>
+        </span>
     </div>
-    <span style="font-size:0.75rem;color:#888"><span class="dot"></span> MT5</span>
+    <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:0.72rem;color:var(--text);text-align:right" id="live-prices">Gold: -- | JPY: --</div>
+        <button class="theme-btn" onclick="toggleTheme()" title="Тема">☀/☾</button>
+        <span style="font-size:0.65rem;color:var(--muted)" id="clock">--</span>
+    </div>
 </div>
 
 <div class="nav">
-    <a href="/bot" class="{{ 'active' if tab == 'signals' else '' }}">Сигналы</a>
+    <a href="/bot" class="{{ 'active' if tab == 'dashboard' else '' }}">Дашборд</a>
     <a href="/bot/positions" class="{{ 'active' if tab == 'positions' else '' }}">Позиции</a>
     <a href="/bot/history" class="{{ 'active' if tab == 'history' else '' }}">История</a>
+    <a href="/bot/stats" class="{{ 'active' if tab == 'stats' else '' }}">Статистика</a>
+    <a href="/bot/login" class="{{ 'active' if tab == 'login' else '' }}">Аккаунт</a>
 </div>
 
-{% if msg %}<div class="msg {{ msg_type }}">{{ msg }}</div>{% endif %}
+{% if tab == 'dashboard' %}
+<div class="cards" id="cards">
+    <div class="card"><div class="label">Баланс</div><div class="value" id="bal">--</div><div class="sub">Equity: <span id="eq">--</span></div></div>
+    <div class="card"><div class="label">Открыто позиций</div><div class="value" id="pos-count">--</div><div class="sub">БУ: <span id="be-count">--</span></div></div>
+    <div class="card"><div class="label">P&L (открытые)</div><div class="value" id="open-pnl">--</div><div class="sub" id="pnl-sub"></div></div>
+    <div class="card"><div class="label">P&L (закрытые)</div><div class="value" id="closed-pnl">--</div><div class="sub" id="closed-sub"></div></div>
+    <div class="card"><div class="label">P&L Сегодня</div><div class="value" id="daily-pnl">--</div><div class="sub" id="daily-sub"></div></div>
+    <div class="card"><div class="label">Лучшая / Худшая</div><div class="value" style="font-size:0.9rem"><span id="best-trade" style="color:#00e676">--</span> / <span id="worst-trade" style="color:#ff5252">--</span></div><div class="sub">сделка</div></div>
+</div>
 
-{% if tab == 'signals' %}
-    {% if signals %}
-        {% for s in signals %}
-        <div class="sig {{ 'buy' if s.direction == 'BUY' else 'sell' }}">
-            <div class="dir {{ 'buy-c' if s.direction == 'BUY' else 'sell-c' }}">
-                {{ '▲' if s.direction == 'BUY' else '▼' }} {{ s.pair }}
-            </div>
-            <div class="info">
-                D1:<span>{{ '✅' if s.d1_fvg else '❌' }}</span>
-                H4:<span>{{ '✅' if s.h4_fvg else '❌' }}</span>
-                COT:<span>{{ s.cot_text }}</span>
-                Lot:<span>{{ s.volume }}</span>
-                Risk:<span style="color:#ff9800">{{ s.risk_pct }}%</span>
-            </div>
-            <div class="prices">
-                <div>{{ s.entry_price }}</div>
-                <div class="sl">SL {{ s.sl_price }}</div>
-                <div class="tp">TP {{ s.tp_price }}</div>
-            </div>
-            <div class="act">
-                <form method="POST" action="/bot/accept/{{ s.id }}"><button class="btn-ok">✓</button></form>
-                <form method="POST" action="/bot/reject/{{ s.id }}"><button class="btn-no">✕</button></form>
-            </div>
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="empty"><p>Нет сигналов</p><p style="font-size:0.75rem">Жду сканирования...</p></div>
-    {% endif %}
+<div class="section-title">Equity</div>
+<canvas id="equity-canvas" height="180"></canvas>
+
+<div class="section-title">P&amp;L по месяцам</div>
+<div style="overflow-x:auto">
+<table class="monthly-table" id="monthly-table"><tbody><tr><td colspan="13">Загрузка...</td></tr></tbody></table>
+</div>
+
+<div class="section-title">P&amp;L по дням недели</div>
+<div style="display:flex;gap:4px;margin-bottom:12px" id="dow-heatmap">
+    <div class="dow-bar"><div class="label">Пн</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Вт</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Ср</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Чт</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Пт</div><div class="bar"></div><div class="val">--</div></div>
+</div>
+
+<div class="section-title">Открытые позиции <span style="font-weight:400;color:var(--muted)" id="pos-time"></span></div>
+<div id="positions"><div class="empty">Загрузка...</div></div>
+
+<div class="section-title">Последние события</div>
+<div id="log"><div class="empty">Загрузка...</div></div>
+
+<div class="refresh-note">Автообновление 10с &bull; <span id="refresh-counter"></span> &bull; <a href="/api/export/csv" class="btn btn-out" style="font-size:0.65rem;padding:2px 8px;margin-left:6px">CSV</a></div>
 
 {% elif tab == 'positions' %}
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <span style="font-size:0.85rem;color:#888">{{ count }} поз. | P&L: <b class="{{ 'pnl-pos' if total_pnl >= 0 else 'pnl-neg' }}">{{ total_pnl }}</b></span>
-        {% if positions %}
-        <form method="POST" action="/bot/close_all">
-            <button style="padding:6px 14px;background:#ff5252;color:#fff;border:none;border-radius:4px;font-weight:700;cursor:pointer;font-size:0.8rem">Закрыть всё</button>
-        </form>
-        {% endif %}
-    </div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+    <span style="font-size:0.85rem;color:var(--text)">{{ count }} поз. | P&L: <b style="color:{{ '#00e676' if total_pnl >= 0 else '#ff5252' }}">{{ total_pnl }}</b></span>
     {% if positions %}
-        {% for p in positions %}
-        <div class="pos">
-            <div style="font-weight:700;min-width:70px">{{ p.symbol }}</div>
-            <div style="font-size:0.8rem;color:#888">{{ '▲ BUY' if p.type == 0 else '▼ SELL' }}</div>
-            <div style="flex:1;font-size:0.8rem">
-                Vol: {{ p.volume }} | Open: {{ p.price_open }} | Curr: {{ p.price_current }}
-            </div>
-            <div style="font-weight:700;min-width:80px;text-align:right" class="{{ 'pnl-pos' if p.profit > 0 else 'pnl-neg' }}">
-                {{ p.profit }}
-            </div>
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="empty"><p>Нет открытых позиций</p></div>
+    <form method="POST" action="/bot/close_all">
+        <button class="btn" style="background:#ff5252;color:#fff">Закрыть всё</button>
+    </form>
     {% endif %}
+</div>
+{% if positions %}
+    {% for p in positions %}
+    <div class="pos-row">
+        <div class="pair">{{ p.symbol }}</div>
+        <div class="dir {{ 'buy' if p.type == 0 else 'sell' }}">{{ '▲' if p.type == 0 else '▼' }} {{ 'BUY' if p.type == 0 else 'SELL' }}</div>
+        <div class="info">
+            Vol: <span>{{ p.volume }}</span> | Open: <span>{{ p.price_open }}</span> | Curr: <span>{{ p.price_current }}</span>
+            {% if p.get('sl') %} | SL: <span style="color:#ff5252">{{ p.sl }}</span>{% endif %}
+            {% if p.get('tp') %} | TP: <span style="color:#00e676">{{ p.tp }}</span>{% endif %}
+        </div>
+        {% if p.get('be_triggered') %}<span class="be-badge be-active">БУ</span>{% endif %}
+        <div class="pnl {{ 'pos' if p.profit > 0 else 'neg' }}">${{ '{:+.2f}'.format(p.profit) }}</div>
+        <div style="display:flex;gap:4px">
+            {% if not p.get('be_triggered') %}
+            <form onsubmit="event.preventDefault();submitAction('/bot/be/{{ p.ticket }}')" style="margin:0"><button class="btn btn-out" style="font-size:0.75rem;padding:6px 14px">БУ</button></form>
+            {% endif %}
+            <form onsubmit="event.preventDefault();submitAction('/bot/close/{{ p.ticket }}')" style="margin:0"><button class="btn" style="background:#ff5252;color:#fff;font-size:0.75rem;padding:6px 14px">✕</button></form>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty">Нет открытых позиций</div>
+{% endif %}
 
 {% elif tab == 'history' %}
-    {% if history %}
-        {% for h in history %}
-        <div class="hist">
-            <span class="tag tag-exec">#{{ h.order_id }}</span>
-            {{ h.pair }} {{ h.direction }}
-            <span style="color:#888;margin-left:8px">@{{ h.entry_price }}</span>
-            <span style="color:#888;margin-left:8px;font-size:0.7rem">{{ h.time[:19] }}</span>
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="empty"><p>История пуста</p></div>
-    {% endif %}
+<div class="filter-row">
+    <form method="GET" action="/bot/history" style="display:flex;gap:8px;flex-wrap:wrap">
+        <select name="pair"><option value="">Все пары</option>
+            {% for p in ['XAU/USD','USD/JPY'] %}
+            <option value="{{ p }}" {{ 'selected' if pair_filter == p else '' }}>{{ p }}</option>
+            {% endfor %}
+        </select>
+        <input name="date" type="month" value="{{ date_filter }}">
+        <button class="btn btn-ok" type="submit">Фильтр</button>
+        <a href="/bot/history" class="btn btn-out">Сброс</a>
+    </form>
+</div>
+{% if history %}
+    {% for h in history %}
+    <div class="hist-entry">
+        <span class="tag {{ 'tag-win' if h.get('result') == 'win' else 'tag-loss' if h.get('result') == 'loss' else 'tag-be' }}">{{ h.get('result', '?') }}</span>
+        <span style="font-weight:600;min-width:55px;color:var(--head)">{{ h.pair }}</span>
+        <span style="font-size:0.7rem;color:var(--sub)">{{ '▲ BUY' if h.direction == 'BUY' else '▼ SELL' }}</span>
+        <span style="flex:1;font-size:0.72rem;color:var(--sub)">
+            Entry: {{ h.entry_price }} | Lot: {{ h.volume }}
+            {% if h.get('pnl') %}| P&L: <span style="color:{{ '#00e676' if h.pnl > 0 else '#ff5252' }}">${{ '{:+.2f}'.format(h.pnl) }}</span>{% endif %}
+        </span>
+        <span style="font-size:0.65rem;color:var(--muted)">{{ h.time[:19] if h.time else '' }}</span>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty">История пуста</div>
+{% endif %}
+{% elif tab == 'stats' %}
+<div class="section-title">Детальная статистика</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px" id="stats-grid">
+    <div class="empty">Загрузка...</div>
+</div>
+
+<script>
+async function loadStats(){
+    try{
+        var d=await fetch('/api/stats/detailed').then(r=>r.json());
+        var html='';
+        Object.keys(d).sort().forEach(function(pair){
+            var s=d[pair];
+            var cards=[
+                ['Сделок',s.trades+' ('+s.be+' БУ)'],
+                ['Win Rate',s.win_rate+'%'],
+                ['Wins / Losses',s.wins+' / '+s.losses],
+                ['P&L','$'+(s.total_pnl>=0?'+':'')+s.total_pnl.toFixed(0)],
+                ['Profit Factor',s.profit_factor],
+                ['Avg Win / Loss','$'+s.avg_win+' / $'+s.avg_loss],
+                ['Avg RR (реализованный)',s.avg_rr],
+                ['Max DD',s.max_dd_pct+'%'],
+                ['Sharpe',s.sharpe],
+                ['Max убытков подряд',s.max_consec_loss],
+                ['Лучшая / Худшая','$'+s.best+' / $'+s.worst],
+            ];
+            html+='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px">';
+            html+='<div style="font-size:0.95rem;font-weight:700;color:var(--head);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">'+pair+'</div>';
+            html+='<table style="width:100%;font-size:0.78rem">';
+            cards.forEach(function(c){
+                html+='<tr><td style="padding:5px 0;color:var(--muted)">'+c[0]+'</td><td style="padding:5px 0;text-align:right;color:var(--head);font-weight:600">'+c[1]+'</td></tr>';
+            });
+            html+='</table></div>';
+        });
+        document.getElementById('stats-grid').innerHTML=html||'<div class="empty">Нет данных</div>';
+    }catch(e){
+        document.getElementById('stats-grid').innerHTML='<div class="empty">Ошибка загрузки</div>';
+    }
+}
+loadStats();
+</script>
+
 {% endif %}
 
 </div>
 
 <script>
-// Countdown to next scan
-var scanMin = {{ scan_interval }};
-function updateTimer() {
-    var now = new Date();
-    var next = new Date(now);
-    next.setMinutes(Math.ceil(now.getMinutes() / scanMin) * scanMin, 0, 0);
-    var diff = Math.floor((next - now) / 1000);
-    var h = Math.floor(diff / 3600);
-    var m = Math.floor((diff % 3600) / 60);
-    document.getElementById('timer').textContent = h + 'h ' + m + 'm';
+var isDashboard = {{ 'true' if tab == 'dashboard' else 'false' }};
+var scanMin = {{ scan_interval if scan_interval is defined else 180 }};
+
+function updateTimer(){
+    var now=new Date(),next=new Date(now);
+    next.setMinutes(Math.ceil(now.getMinutes()/scanMin)*scanMin,0,0);
+    var d=Math.floor((next-now)/1000);
+    document.getElementById('next-scan').textContent=Math.floor(d/3600)+'h '+Math.floor(d%3600/60)+'m';
+    document.getElementById('clock').textContent=now.toLocaleTimeString();
 }
-setInterval(updateTimer, 1000);
-updateTimer();
+setInterval(updateTimer,1000); updateTimer();
+
+var theme=localStorage.getItem('theme')||'dark';
+document.documentElement.setAttribute('data-theme',theme);
+function toggleTheme(){
+    theme=theme==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',theme);
+    localStorage.setItem('theme',theme);
+}
+
+function showToast(title,body,type){
+    var t=document.createElement('div');
+    t.className='toast '+(type==='ok'?'toast-ok':'toast-err');
+    t.innerHTML='<div class="t-title">'+title+'</div><div class="t-body">'+body+'</div>';
+    document.body.appendChild(t);
+    setTimeout(function(){t.style.opacity='0';t.style.transition='opacity 0.3s';setTimeout(function(){t.remove()},300)},2500);
+}
+
+async function submitAction(url){
+    try{
+        var r=await fetch(url,{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'}});
+        var d=await r.json();
+        if(d.ok){showToast('Готово',d.msg,'ok')}else{showToast('Ошибка',d.msg,'err')}
+        setTimeout(function(){if(isDashboard)refresh();else window.location.reload()},800);
+    }catch(e){showToast('Ошибка','Не удалось выполнить','err')}
+}
+
+var refreshCount=0;
+
+function drawEquity(data){
+    var c=document.getElementById('equity-canvas');
+    if(!c||!data||data.length<2)return;
+    var ctx=c.getContext('2d'),w=c.parentElement.clientWidth-24;
+    c.width=w;c.height=180;
+    var min=data[0],max=data[0];
+    data.forEach(function(d){if(d<min)min=d;if(d>max)max=d;});
+    var pad=(max-min)*0.1||1000;
+    ctx.clearRect(0,0,w,180);
+    ctx.beginPath();ctx.strokeStyle='#21262d';ctx.lineWidth=1;
+    for(var i=0;i<5;i++){var y=20+i*40;ctx.moveTo(0,y);ctx.lineTo(w,y);}ctx.stroke();
+
+    ctx.beginPath();ctx.strokeStyle='#00e676';ctx.lineWidth=2;
+    data.forEach(function(v,i){
+        var x=i/(data.length-1)*w;
+        var y=180-((v-(min-pad))/(max-min+2*pad))*180;
+        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+
+    // Baseline at start
+    var baseY=180-((data[0]-(min-pad))/(max-min+2*pad))*180;
+    ctx.beginPath();ctx.strokeStyle='#30363d';ctx.setLineDash([4,4]);ctx.lineWidth=1;
+    ctx.moveTo(0,baseY);ctx.lineTo(w,baseY);ctx.stroke();ctx.setLineDash([]);
+}
+
+function buildMonthlyTable(months){
+    var t=document.getElementById('monthly-table');
+    if(!t)return;
+    var keys=Object.keys(months).sort();
+    if(!keys.length){t.innerHTML='<tbody><tr><td colspan="13">Нет данных</td></tr></tbody>';return;}
+    var html='<thead><tr><th>Год</th>';
+    for(var m=1;m<=12;m++)html+='<th>'+['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'][m-1]+'</th>';
+    html+='<th>Год</th></tr></thead><tbody>';
+    var years={};
+    keys.forEach(function(k){var y=k.substring(0,4);if(!years[y])years[y]={};years[y][k]=months[k];});
+    Object.keys(years).sort().forEach(function(y){
+        html+='<tr><td style="color:var(--head);font-weight:600">'+y+'</td>';
+        var yTotal=0;
+        for(var m=1;m<=12;m++){
+            var mk=y+'-'+String(m).padStart(2,'0'),v=months[mk]||0;
+            yTotal+=v;
+            if(v===0)html+='<td style="color:var(--muted)">-</td>';
+            else html+='<td class="'+(v>=0?'pnl-pos':'pnl-neg')+'">$'+(v>=0?'+':'')+v.toFixed(0)+'</td>';
+        }
+        html+='<td style="font-weight:700" class="'+(yTotal>=0?'pnl-pos':'pnl-neg')+'">$'+(yTotal>=0?'+':'')+yTotal.toFixed(0)+'</td></tr>';
+    });
+    html+='</tbody>';
+    t.innerHTML=html;
+}
+
+async function refresh(){
+    refreshCount++;
+    document.getElementById('refresh-counter').textContent='обновление #'+refreshCount;
+    var p=null,s=null,l=null,pr=null;
+    try{p=await fetch('/api/positions').then(r=>r.json())}catch(e){}
+    try{s=await fetch('/api/stats').then(r=>r.json())}catch(e){}
+    try{l=await fetch('/api/log?n=10').then(r=>r.json())}catch(e){}
+    try{pr=await fetch('/api/prices').then(r=>r.json())}catch(e){}
+    if(!s)return;
+
+    if(pr && !pr.error){
+        var g=pr['XAU/USD']||{}, u=pr['USD/JPY']||{};
+        document.getElementById('live-prices').innerHTML=
+            'Gold <b style="color:#ffab00">'+(g.bid||0).toFixed(2)+'</b> | '+
+            'JPY <b style="color:#ffab00">'+(u.bid||0).toFixed(3)+'</b>';
+    }
+
+    // Cards
+    document.getElementById('bal').textContent='$'+s.balance.toFixed(0);
+    document.getElementById('eq').textContent='$'+s.equity.toFixed(0);
+    document.getElementById('pos-count').textContent=s.positions_count;
+    document.getElementById('be-count').textContent=s.be_count;
+    var opnl=s.open_pnl, opp=s.open_pnl_pct||0;
+    var opnEl=document.getElementById('open-pnl');
+    opnEl.textContent='$'+(opnl>=0?'+':'')+opnl.toFixed(2);
+    opnEl.className='value '+(opnl>=0?'val-green':'val-red');
+    document.getElementById('pnl-sub').textContent=(opp>=0?'+':'')+opp.toFixed(2)+'% | '+s.be_count+'/'+s.positions_count+' в БУ';
+    var cpnl=s.closed_pnl, cpp=cpnl/s.balance*100||0;
+    var cpnlEl=document.getElementById('closed-pnl');
+    cpnlEl.textContent='$'+(cpnl>=0?'+':'')+cpnl.toFixed(2);
+    cpnlEl.className='value '+(cpnl>=0?'val-green':'val-red');
+    document.getElementById('closed-sub').textContent=(cpp>=0?'+':'')+cpp.toFixed(2)+'% | '+s.total_trades+' сделок';
+    var dpnl=s.daily_pnl||0, dpp=s.daily_pnl_pct||0;
+    var dpnlEl=document.getElementById('daily-pnl');
+    dpnlEl.textContent='$'+(dpnl>=0?'+':'')+dpnl.toFixed(2);
+    dpnlEl.className='value '+(dpnl>=0?'val-green':'val-red');
+    document.getElementById('daily-sub').textContent=(dpp>=0?'+':'')+dpp.toFixed(2)+'% сегодня';
+    document.getElementById('best-trade').textContent='$'+(s.best_trade||0).toFixed(0);
+    document.getElementById('worst-trade').textContent='$'+(s.worst_trade||0).toFixed(0);
+
+    // Equity graph
+    if(s.equity_history) drawEquity(s.equity_history);
+
+    // Monthly P&L
+    if(s.monthly_pnl) buildMonthlyTable(s.monthly_pnl);
+
+    // DOW heatmap
+    var dow=s.dow_pnl||{}, days=['Пн','Вт','Ср','Чт','Пт'];
+    var maxAbs=1;
+    days.forEach(function(d){maxAbs=Math.max(maxAbs,Math.abs(dow[d]||0))});
+    days.forEach(function(d,i){
+        var v=dow[d]||0, pct=Math.min(Math.abs(v)/maxAbs*100,100);
+        var bar=document.querySelectorAll('#dow-heatmap .dow-bar')[i];
+        if(!bar)return;
+        bar.querySelector('.val').textContent='$'+(v>=0?'+':'')+v.toFixed(0);
+        var b=bar.querySelector('.bar');
+        b.style.height=(pct||4)+'px';
+        b.className='bar '+(v>0?'bar-pos':v<0?'bar-neg':'bar-zero');
+    });
+
+    // Positions
+    document.getElementById('pos-time').textContent='(live)';
+    var ph=document.getElementById('positions');
+    if(!p||!p.positions||p.positions.length===0){
+        ph.innerHTML='<div class="empty">Нет открытых позиций</div>';
+    }else{
+        var html='';
+        p.positions.forEach(function(pos){
+            var dirClass=pos.type===0?'buy':'sell';
+            var dirArrow=pos.type===0?'&#9650;':'&#9660;';
+            var pnlClass=pos.profit>=0?'pos':'neg';
+            var dur=pos.duration||'';
+            var slDist=pos.sl_dist_pct||0, tpDist=pos.tp_dist_pct||0;
+            var beHtml=pos.be_triggered?
+                '<span class="be-badge be-active">БУ</span>':
+                '<span class="be-badge be-waiting">SL</span>';
+            var btns='<div style="display:flex;gap:5px;margin-left:6px">';
+            if(!pos.be_triggered) btns+='<button class="btn btn-out" onclick="submitAction(\'/bot/be/'+pos.ticket+'\')" style="font-size:0.75rem;padding:6px 14px">БУ</button>';
+            btns+='<button class="btn" onclick="submitAction(\'/bot/close/'+pos.ticket+'\')" style="background:#ff5252;color:#fff;font-size:0.75rem;padding:6px 14px">✕</button></div>';
+            html+='<div class="pos-row">'+
+                '<div class="pair">'+pos.symbol+'</div>'+
+                '<div class="dir '+dirClass+'">'+dirArrow+' '+(pos.type===0?'BUY':'SELL')+'</div>'+
+                '<div class="info">'+
+                    'Entry: <span>'+pos.entry+'</span> &nbsp;'+
+                    'SL: <span style="color:#ff5252">'+pos.sl+'</span> &nbsp;'+
+                    'TP: <span style="color:#00e676">'+pos.tp+'</span> &nbsp;'+
+                    'Lot: <span>'+pos.volume+'</span>'+
+                    (dur?' &nbsp; <span style="color:var(--muted)">'+dur+'</span>':'')+
+                    '<div class="sl-tp">SL: <span style="color:#ff5252">'+(slDist>=0?'+':'')+slDist.toFixed(2)+'%</span> | TP: <span style="color:#00e676">'+(tpDist>=0?'+':'')+tpDist.toFixed(2)+'%</span></div>'+
+                '</div>'+beHtml+
+                '<div class="pnl '+pnlClass+'">$'+(pos.profit>=0?'+':'')+pos.profit.toFixed(2)+'</div>'+
+                btns+
+                '</div>';
+        });
+        ph.innerHTML=html;
+    }
+
+    // Log
+    var lh=document.getElementById('log');
+    if(!l||!l.log||l.log.length===0){
+        lh.innerHTML='<div class="empty">Нет событий</div>';
+    }else{
+        var lhtml='';
+        l.log.forEach(function(e){
+            lhtml+='<div class="log-entry"><span class="log-time">'+e.time+'</span><span class="log-msg">'+e.msg+'</span></div>';
+        });
+        lh.innerHTML=lhtml;
+    }
+}
+if(isDashboard){ refresh(); setInterval(refresh,10000); }
 </script>
 </body>
 </html>"""
 
+# --- API ---
+
+@app.route("/api/positions")
+def api_positions():
+    try:
+        from mt5_client import client as mt5
+        import main as _main
+        mt5.connect()
+        positions = mt5.get_positions()
+        mt5.disconnect()
+        result = []
+        for p in positions:
+            ticket = p["ticket"]
+            be_info = _main.be_tracked.get(ticket, {})
+            open_time = p.get("time", None)
+            duration = ""
+            if open_time:
+                if isinstance(open_time, (int, float)):
+                    open_time_dt = datetime.fromtimestamp(open_time)
+                    open_time_str = str(open_time_dt)[:19]
+                else:
+                    open_time_str = str(open_time)[:19]
+                    open_time_dt = open_time
+                delta = datetime.now() - open_time_dt if isinstance(open_time_dt, datetime) else None
+                if delta:
+                    days = delta.days
+                    hours, rem = divmod(delta.seconds, 3600)
+                    mins = rem // 60
+                    if days > 0: duration = f"{days}d {hours}h"
+                    elif hours > 0: duration = f"{hours}h {mins}m"
+                    else: duration = f"{mins}m"
+            else:
+                open_time_str = None
+            entry_p = p["price_open"]
+            sl_p = p.get("sl", 0)
+            tp_p = p.get("tp", 0)
+            sl_dist = tp_dist = 0
+            if entry_p and sl_p: sl_dist = round((sl_p - entry_p) / entry_p * 100, 2)
+            if entry_p and tp_p: tp_dist = round((tp_p - entry_p) / entry_p * 100, 2)
+            result.append({
+                "ticket": ticket, "symbol": p["symbol"], "type": p["type"],
+                "volume": p["volume"], "entry": entry_p, "sl": sl_p, "tp": tp_p,
+                "profit": p.get("profit", 0),
+                "be_triggered": be_info.get("be_triggered", False),
+                "open_time": open_time_str, "duration": duration,
+                "sl_dist_pct": sl_dist, "tp_dist_pct": tp_dist,
+            })
+        return jsonify({"positions": result})
+    except Exception as e:
+        return jsonify({"positions": [], "error": str(e)})
+
+
+@app.route("/api/stats")
+def api_stats():
+    try:
+        from mt5_client import client as mt5
+        import main as _main
+        mt5.connect()
+        acc = mt5.get_account_summary()
+        positions = mt5.get_positions()
+        mt5.disconnect()
+
+        open_pnl = sum(p.get("profit", 0) for p in positions)
+        be_count = sum(1 for p in positions
+                       if _main.be_tracked.get(p["ticket"], {}).get("be_triggered"))
+        orders = database.get_order_history(5000)
+        total_trades = len(orders)
+        wins = sum(1 for o in orders if o.get("result") == "win")
+        losses = sum(1 for o in orders if o.get("result") == "loss")
+        closed_pnl = sum(o.get("pnl", 0) for o in orders if o.get("pnl"))
+        wr = wins / (wins + losses) * 100 if (wins + losses) > 0 else 0
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        daily_pnl = sum(o.get("pnl", 0) for o in orders if o.get("time", "").startswith(today))
+
+        # Best/worst trade
+        pnls = [o.get("pnl", 0) for o in orders if o.get("pnl")]
+        best = max(pnls) if pnls else 0
+        worst = min(pnls) if pnls else 0
+
+        # Day-of-week
+        dow_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+        dow_pnl = {d: 0.0 for d in dow_names}
+        for o in orders:
+            t = o.get("time", "")
+            if t and o.get("pnl"):
+                try:
+                    dt = datetime.fromisoformat(t[:19])
+                    dow_pnl[dow_names[dt.weekday()]] += o["pnl"]
+                except: pass
+
+        # Monthly P&L
+        monthly_pnl = {}
+        for o in orders:
+            t = o.get("time", "")
+            if t and o.get("pnl"):
+                monthly_pnl[t[:7]] = monthly_pnl.get(t[:7], 0) + o["pnl"]
+
+        # Equity history (cumulative P&L over time from closed trades)
+        equity_history = []
+        cum = 0
+        for o in reversed(orders):
+            if o.get("pnl"):
+                cum += o["pnl"]
+                equity_history.append(round(o.get("balance", cum), 2))
+        if not equity_history and orders:
+            equity_history = [acc.get("balance", 0)]
+
+        bal = acc.get("balance", 0)
+        open_pnl_pct = round(open_pnl / bal * 100, 2) if bal > 0 else 0
+        daily_pnl_pct = round(daily_pnl / bal * 100, 2) if bal > 0 else 0
+
+        return jsonify({
+            "balance": bal, "equity": acc.get("equity", 0),
+            "positions_count": len(positions), "be_count": be_count,
+            "open_pnl": open_pnl, "open_pnl_pct": open_pnl_pct,
+            "total_trades": total_trades, "closed_pnl": closed_pnl,
+            "win_rate": wr, "daily_pnl": daily_pnl, "daily_pnl_pct": daily_pnl_pct,
+            "best_trade": best, "worst_trade": worst,
+            "dow_pnl": dow_pnl, "monthly_pnl": monthly_pnl,
+            "equity_history": equity_history,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/api/prices")
+def api_prices():
+    try:
+        from mt5_client import client as mt5
+        import config
+        mt5.connect()
+        prices = {}
+        for pair_name, symbol in config.PAIRS.items():
+            tick = mt5.get_current_price(symbol)
+            prices[pair_name] = {"bid": tick["bid"], "ask": tick["ask"]}
+        mt5.disconnect()
+        return jsonify(prices)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/api/log")
+def api_log():
+    n = request.args.get("n", 20, type=int)
+    return jsonify({"log": log_entries[:n]})
+
+
+@app.route("/api/export/csv")
+def export_csv():
+    orders = database.get_order_history(5000)
+    output = io.StringIO()
+    w = csv.writer(output)
+    w.writerow(["time","pair","direction","entry_price","sl_price","tp_price","volume","pnl","result"])
+    for o in orders:
+        w.writerow([o.get("time",""), o.get("pair",""), o.get("direction",""),
+                    o.get("entry_price",""), o.get("sl_price",""), o.get("tp_price",""),
+                    o.get("volume",""), o.get("pnl",""), o.get("result","")])
+    output.seek(0)
+    return Response(output.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment;filename=trades.csv"})
+
+
+# --- Pages ---
 
 @app.route("/bot")
-def bot_page():
-    signals = [{**s, "id": sid} for sid, s in pending_signals.items()]
-    return render_template_string(HTML, signals=signals, tab="signals", msg=None, msg_type="", positions=[], history=[], scan_interval=180)
+def dashboard():
+    return render_template_string(HTML, state=bot_state, tab="dashboard",
+                                  positions=[], history=[], total_pnl=0, count=0,
+                                  scan_interval=180, pair_filter="", date_filter="")
 
 
 @app.route("/bot/positions")
 def positions_page():
     try:
         from mt5_client import client as mt5
+        import main as _main
         mt5.connect()
         summary = mt5.get_positions_summary()
-        mt5.disconnect()
         positions = summary["positions"]
-        total_pnl = summary["total_pnl"]
-        count = summary["count"]
+        for p in positions:
+            p["be_triggered"] = _main.be_tracked.get(p["ticket"], {}).get("be_triggered", False)
+        mt5.disconnect()
+        total_pnl = summary["total_pnl"]; count = summary["count"]
     except Exception:
         positions = []; total_pnl = 0; count = 0
     return render_template_string(HTML, positions=positions, total_pnl=total_pnl,
-                                  count=count, tab="positions", msg=None, msg_type="",
-                                  signals=[], history=[])
+                                  count=count, tab="positions", state=bot_state,
+                                  history=[], pair_filter="", date_filter="")
+
+
+@app.route("/api/stats/detailed")
+def api_stats_detailed():
+    import config
+    orders = database.get_order_history(5000)
+    pairs = list(config.PAIRS.keys())  # Only active pairs
+
+    def calc_pair_stats(pair_name):
+        trades = [o for o in orders if o.get("pair") == pair_name]
+        closed = [o for o in trades if o.get("result") in ("win", "loss")]
+        wins = [o for o in closed if o.get("result") == "win"]
+        losses = [o for o in closed if o.get("result") == "loss"]
+        bes = [o for o in trades if o.get("result") == "be"]
+
+        n = len(closed)
+        w = len(wins)
+        l = len(losses)
+        wr = w / n * 100 if n > 0 else 0
+        total_pnl = sum(o.get("pnl", 0) for o in closed)
+        avg_win = sum(o.get("pnl", 0) for o in wins) / w if w > 0 else 0
+        avg_loss = sum(o.get("pnl", 0) for o in losses) / l if l > 0 else 0
+        gross_profit = sum(o.get("pnl", 0) for o in wins)
+        gross_loss = abs(sum(o.get("pnl", 0) for o in losses))
+        pf = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+
+        # Avg realized RR
+        rr_values = []
+        for o in closed:
+            sl_d = abs(o.get("entry_price", 0) - o.get("sl_price", 0))
+            tp_d = abs(o.get("tp_price", 0) - o.get("entry_price", 0))
+            if sl_d > 0 and o.get("result") == "win":
+                rr_values.append(tp_d / sl_d)
+
+        avg_rr = sum(rr_values) / len(rr_values) if rr_values else 0
+
+        # Max DD (from balance history in trades)
+        peak = 0; max_dd = 0
+        for o in trades:
+            bal = o.get("balance", 0)
+            if bal > peak: peak = bal
+            dd = (peak - bal) / peak * 100 if peak > 0 else 0
+            if dd > max_dd: max_dd = dd
+
+        # Sharpe (simplified: mean / std of P&L)
+        pnls = [o.get("pnl", 0) for o in closed]
+        mean_pnl = sum(pnls) / len(pnls) if pnls else 0
+        std_pnl = (sum((x - mean_pnl)**2 for x in pnls) / len(pnls))**0.5 if pnls else 0
+        sharpe = mean_pnl / std_pnl if std_pnl > 0 else 0
+
+        # Consecutive losses
+        max_consec = 0; cur = 0
+        for o in closed:
+            if o.get("result") == "loss":
+                cur += 1; max_consec = max(max_consec, cur)
+            else:
+                cur = 0
+
+        return {
+            "trades": n, "be": len(bes), "wins": w, "losses": l,
+            "win_rate": round(wr, 1), "total_pnl": round(total_pnl, 2),
+            "avg_win": round(avg_win, 2), "avg_loss": round(avg_loss, 2),
+            "profit_factor": round(pf, 2) if pf != float("inf") else "inf",
+            "max_dd_pct": round(max_dd, 2),
+            "sharpe": round(sharpe, 2),
+            "avg_rr": round(avg_rr, 2),
+            "max_consec_loss": max_consec,
+            "best": round(max(o.get("pnl", 0) for o in closed), 2) if closed else 0,
+            "worst": round(min(o.get("pnl", 0) for o in closed), 2) if closed else 0,
+        }
+
+    result = {}
+    for p in pairs:
+        result[p] = calc_pair_stats(p)
+    return jsonify(result)
+
+
+@app.route("/bot/stats")
+def stats_page():
+    return render_template_string(HTML, tab="stats", state=bot_state,
+                                  positions=[], history=[], total_pnl=0, count=0,
+                                  scan_interval=180, pair_filter="", date_filter="")
+
+
+@app.route("/bot/history")
+def history_page():
+    pair_filter = request.args.get("pair", "")
+    date_filter = request.args.get("date", "")
+    hist = database.get_order_history(500)
+    if pair_filter:
+        hist = [h for h in hist if h.get("pair", "") == pair_filter]
+    if date_filter:
+        hist = [h for h in hist if (h.get("time", "") or "").startswith(date_filter)]
+    hist = hist[:100]
+    return render_template_string(HTML, history=hist, tab="history", state=bot_state,
+                                  pair_filter=pair_filter, date_filter=date_filter)
+
+
+@app.route("/bot/close/<int:ticket>", methods=["POST"])
+def close_one(ticket):
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    try:
+        from mt5_client import client as mt5
+        mt5.connect()
+        ok = mt5.close_position(ticket)
+        mt5.disconnect()
+        if ok:
+            add_log(f"Закрыта позиция #{ticket}")
+            if is_ajax: return jsonify({"ok": True, "msg": f"#{ticket} закрыта"})
+        else:
+            if is_ajax: return jsonify({"ok": False, "msg": f"Не удалось закрыть #{ticket}"})
+    except Exception as e:
+        if is_ajax: return jsonify({"ok": False, "msg": str(e)})
+    return "<script>window.location='/bot/positions'</script>"
+
+
+@app.route("/bot/be/<int:ticket>", methods=["POST"])
+def move_to_be(ticket):
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    try:
+        from mt5_client import client as mt5
+        import main as _main
+        mt5.connect()
+        pos = mt5.get_positions()
+        target = None
+        for p in pos:
+            if p["ticket"] == ticket:
+                target = p
+                break
+        if target:
+            entry = target["price_open"]
+            current = target.get("price_current", 0)
+            ptype = target["type"]  # 0=BUY, 1=SELL
+            # Check: can only move SL to BE when position is in profit
+            in_profit = (ptype == 0 and current > entry) or (ptype == 1 and current < entry)
+            if not in_profit:
+                mt5.disconnect()
+                if is_ajax: return jsonify({"ok": False, "msg": "БУ недоступен: позиция не в плюсе"})
+                return "<script>alert('БУ недоступен: позиция не в плюсе');window.location='/bot/positions'</script>"
+            ok = mt5.modify_sl(ticket, entry)
+            if ok:
+                _main.be_tracked[ticket] = {"be_triggered": True, "entry_price": entry,
+                                              "symbol": target["symbol"],
+                                              "direction": "BUY" if target["type"] == 0 else "SELL"}
+                add_log(f"#{ticket} SL → BE ({entry})")
+                if is_ajax: return jsonify({"ok": True, "msg": f"#{ticket} → БУ"})
+            else:
+                if is_ajax: return jsonify({"ok": False, "msg": f"Не удалось изменить SL #{ticket}"})
+        mt5.disconnect()
+    except Exception as e:
+        if is_ajax: return jsonify({"ok": False, "msg": str(e)})
+    return "<script>window.location='/bot/positions'</script>"
 
 
 @app.route("/bot/close_all", methods=["POST"])
@@ -205,116 +829,26 @@ def close_all():
         mt5.connect()
         n = mt5.close_all_positions()
         mt5.disconnect()
-        msg = f"Закрыто позиций: {n}"
-        msg_type = "msg-ok"
+        add_log(f"Закрыто позиций: {n}")
     except Exception as e:
-        msg = f"Ошибка: {e}"
-        msg_type = "msg-err"
-    # Re-render positions
-    try:
-        from mt5_client import client as mt5
-        mt5.connect()
-        summary = mt5.get_positions_summary()
-        mt5.disconnect()
-    except Exception:
-        summary = {"positions": [], "total_pnl": 0, "count": 0}
-    return render_template_string(HTML, positions=summary["positions"],
-                                  total_pnl=summary["total_pnl"], count=summary["count"],
-                                  tab="positions", msg=msg, msg_type=msg_type,
-                                  signals=[], history=[])
-
-
-@app.route("/bot/history")
-def history_page():
-    hist = database.get_order_history(50)
-    return render_template_string(HTML, history=hist, tab="history", msg=None, msg_type="", signals=[], positions=[], scan_interval=180)
+        add_log(f"Ошибка: {e}")
+    return "<script>window.location='/bot/positions'</script>"
 
 
 @app.route("/bot/accept/<sig_id>", methods=["POST"])
 def accept(sig_id):
-    sig_id = int(sig_id)
-    sig = pending_signals.pop(sig_id, None)
-    if sig is None:
-        return render_template_string(HTML, signals=[], tab="signals", msg="Сигнал устарел", msg_type="msg-err", positions=[], history=[])
-
-    try:
-        import config
-        from mt5_client import client as mt5
-        from fractal_detector import nearest_fractal, calculate_atr
-        from risk_manager import calculate_lot
-
-        mt5.connect()
-        symbol = config.PAIRS.get(sig["pair"])
-        tick = mt5.get_current_price(symbol)
-        entry = tick["bid"] if sig["direction"] == "SELL" else tick["ask"]
-        fvg_dir = "bearish" if sig["direction"] == "SELL" else "bullish"
-        df_h4 = mt5.get_candles(symbol, "H4", 50)
-        atr_val = calculate_atr(df_h4, 14)
-        sl = nearest_fractal(df_h4, fvg_dir, entry, atr_value=atr_val)
-
-        if sl is None:
-            mt5.disconnect()
-            return "<script>alert('Не найден фрактал'); window.location='/bot'</script>"
-
-        acc = mt5.get_account_summary()
-        info = mt5.get_symbol_info(symbol)
-        balance = float(acc.get("balance", 0))
-        pos = calculate_lot(balance, entry, sl, sig["risk_pct"], sig["pair"],
-                            info["point"], info["trade_contract_size"],
-                            info["trade_tick_value"])
-        tp = pos["tp_price"]
-
-        result = mt5.place_market_order(symbol, sig["direction"], float(sl),
-                                         float(tp), float(pos["volume"]))
-
-        if result is None:
-            mt5.disconnect()
-            err = (f"ORDER FAILED: {sig['pair']} {sig['direction']} "
-                   f"Entry={entry:.5f} SL={sl:.5f} TP={tp:.5f} Lot={pos['volume']}")
-            print(err)
-            return f"<script>alert('{err}'); window.location='/bot'</script>"
-
-        # Register for BE tracking
-        import main as _main
-        _main.register_be(result["order"], symbol, entry, sig["direction"])
-
-        mt5.disconnect()
-
-        sig["status"] = "executed"
-        sig["order"] = result.get("order")
-        sig["entry_price"] = entry
-        sig["sl_price"] = sl
-        sig["tp_price"] = tp
-
-        # Save to DB
-        sid = database.save_signal(sig)
-        if sig.get("order"):
-            database.save_order(sid, sig, sig["order"])
-
-        order_id = sig.get("order", "?")
-        msg = f"#{order_id} — {sig['pair']} {sig['direction']} Entry={entry:.5f}"
-        return f"<script>alert('{msg}'); window.location='/bot'</script>"
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return f"<script>alert('Ошибка: {e}'); window.location='/bot'</script>"
-
+    return "<script>alert('Авто-режим');window.location='/bot'</script>"
 
 @app.route("/bot/reject/<sig_id>", methods=["POST"])
 def reject(sig_id):
-    sig_id = int(sig_id)
-    sig = pending_signals.pop(sig_id, None)
-    if sig:
-        sig["status"] = "rejected"
-        database.save_signal(sig)
     return "<script>window.location='/bot'</script>"
 
 
 def run_web(port=5002):
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-
 def start_web():
     t = threading.Thread(target=run_web, daemon=True)
     t.start()
-    print(f"[Web] UI at http://localhost:5002/bot")
+    print(f"[Web] Dashboard v3 at http://localhost:5002/bot")
     return t

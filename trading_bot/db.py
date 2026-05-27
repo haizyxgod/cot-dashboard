@@ -31,9 +31,19 @@ def init():
             pair TEXT, direction TEXT,
             entry_price REAL, sl_price REAL, tp_price REAL,
             volume REAL, order_id INTEGER,
+            pnl REAL DEFAULT 0, result TEXT DEFAULT '',
             FOREIGN KEY (signal_id) REFERENCES signals(id)
         )
     """)
+    # Add pnl/result columns if table already existed without them
+    try:
+        db.execute("ALTER TABLE orders ADD COLUMN pnl REAL DEFAULT 0")
+    except:
+        pass
+    try:
+        db.execute("ALTER TABLE orders ADD COLUMN result TEXT DEFAULT ''")
+    except:
+        pass
     db.commit()
     db.close()
 
@@ -75,6 +85,21 @@ def get_order_history(limit=50):
     rows = db.execute("SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+
+def save_closed_trade(ticket, pair, direction, entry_price, sl_price,
+                      tp_price, volume, pnl, result, exit_price, open_time):
+    db = get_db()
+    db.execute("""
+        INSERT OR REPLACE INTO orders
+        (order_id, time, pair, direction, entry_price, sl_price, tp_price,
+         volume, pnl, result)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (ticket, open_time, pair, direction, entry_price, sl_price, tp_price,
+          volume, round(pnl, 2), result))
+    db.commit()
+    db.close()
+    return True
 
 
 def get_signal_history(limit=50):

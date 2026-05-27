@@ -26,6 +26,7 @@ from signal_engine import evaluate_setup
 from risk_manager import calculate_lot
 from trend_filter import check_daily_trend
 import web_server
+from web_server import add_log, bot_state
 import config
 import db as database
 
@@ -103,7 +104,8 @@ def check_be():
             continue  # already moved to BE
 
         if ticket not in pos_by_ticket:
-            # Position closed — clean up
+            # Position closed — log to DB
+            _log_closed_trade(ticket, info)
             be_tracked.pop(ticket, None)
             continue
 
@@ -143,12 +145,72 @@ def check_be():
                     info["be_triggered"] = True
                     print(f"[BE] Ticket #{ticket} {symbol} {direction}: "
                           f"SL moved to {entry} (BE)")
+                    web_server.add_log(
+                        f"<span class='hl'>{symbol}</span> #{ticket} "
+                        f"SL → BE ({info['entry_price']})")
+                    _notify_be(ticket, symbol, direction, info["entry_price"])
                 else:
                     print(f"[BE] Ticket #{ticket}: modify SL failed")
         except Exception as e:
             print(f"[BE] Error ticket #{ticket}: {e}")
 
     mt5.disconnect()
+
+
+def _log_closed_trade(ticket, info):
+    """When a position closes, determine result and save to DB."""
+    try:
+        from datetime import datetime
+        deals = mt5.get_position_history(hours=48)
+        entry_price = info["entry_price"]
+        direction = info["direction"]
+        symbol = info["symbol"]
+        pnl = 0
+        exit_price = 0
+        volume = 0
+
+        # Find matching deal
+        for d in deals:
+            if d.get("position_id") == ticket or d.get("order") == ticket:
+                pnl += d.get("profit", 0)
+                if d.get("price") and d.get("price") != entry_price:
+                    exit_price = d["price"]
+                volume = d.get("volume", volume)
+
+        if exit_price == 0:
+            exit_price = entry_price
+
+        # Determine result
+        if pnl > 0.01:
+            result = "win"
+        elif pnl < -0.01:
+            result = "loss"
+        else:
+            result = "be"
+
+        import db as database
+        database.save_closed_trade(
+            ticket=ticket, pair=symbol_to_pair(symbol),
+            direction=direction, entry_price=entry_price,
+            sl_price=info.get("sl", 0), tp_price=info.get("tp", 0),
+            volume=volume, pnl=pnl, result=result,
+            exit_price=exit_price,
+            open_time=str(datetime.now())
+        )
+        print(f"[LOG] #{ticket} {symbol} {direction}: {result} PnL=${pnl:.2f}")
+        _notify_close(ticket, symbol, direction, pnl, result, exit_price)
+        web_server.add_log(
+            f"<span class='hl'>{symbol}</span> #{ticket}: "
+            f"{result.upper()} ${pnl:+.2f}")
+    except Exception as e:
+        print(f"[LOG] Error logging #{ticket}: {e}")
+
+
+def symbol_to_pair(symbol):
+    for pair_name, sym in config.PAIRS.items():
+        if sym == symbol:
+            return pair_name
+    return symbol
 
 
 def register_be(ticket, symbol, entry_price, direction):
@@ -162,21 +224,41 @@ def register_be(ticket, symbol, entry_price, direction):
     print(f"[BE] Tracking #{ticket} {symbol} {direction} entry={entry_price}")
 
 
-def _notify_trade(pair, direction, entry, sl, tp, vol, risk_pct, reason, order_id):
-    """Send Telegram notification about executed trade."""
+def _tg(msg):
+    """Send Telegram message, fail silently."""
     try:
         from telegram_bot import send_text
-        emoji = "🟢" if direction == "BUY" else "🔴"
-        msg = (
-            f"{emoji} *{pair} {direction}* — ИСПОЛНЕН #{order_id}\n"
-            f"Вход: `{entry:.5f}`\n"
-            f"SL: `{sl:.5f}` | TP: `{tp:.5f}`\n"
-            f"Лот: *{vol}* | Риск: *{risk_pct}%*\n"
-            f"_{reason}_"
-        )
         send_text(msg)
     except Exception as e:
-        print(f"[TG] Notify error: {e}")
+        print(f"[TG] Error: {e}")
+
+
+def _notify_trade(pair, direction, entry, sl, tp, vol, risk_pct, reason, order_id):
+    emoji = "\U0001f7e2" if direction == "BUY" else "\U0001f534"
+    _tg(f"{emoji} *{pair} {direction}* #{order_id}\n"
+        f"Entry: {entry:.5f} | Lot: {vol}\n"
+        f"SL: {sl:.5f} | TP: {tp:.5f}\n"
+        f"Risk: {risk_pct}% | {reason}")
+
+
+def _notify_close(ticket, symbol, direction, pnl, result, exit_price):
+    if result == "win":
+        emoji, label = "✅", "TP HIT"
+    elif result == "loss":
+        emoji, label = "❌", "SL HIT"
+    else:
+        emoji, label = "➖", "BE"
+    _tg(f"{emoji} *{symbol} {direction}* #{ticket} — {label}\n"
+        f"Exit: {exit_price:.5f} | PnL: ${pnl:+.2f}")
+
+
+def _notify_be(ticket, symbol, direction, entry):
+    _tg(f"\U0001f7e1 *{symbol} {direction}* #{ticket}\n"
+        f"SL -> BE ({entry:.5f})")
+
+
+def _notify_error(pair, direction, reason):
+    _tg(f"⚠️ *{pair} {direction}* — ORDER FAILED\n{reason}")
 
 
 def scan_all():
@@ -185,7 +267,12 @@ def scan_all():
 
     if not mt5.connect():
         print("  MT5 not connected")
+        bot_state["mt5_connected"] = False
         return
+
+    bot_state["mt5_connected"] = True
+    bot_state["last_scan"] = datetime.now().isoformat()
+    web_server.add_log("Сканирование начато")
 
     open_positions = mt5.get_positions()
     occupied_symbols = {p["symbol"] for p in open_positions}
@@ -285,6 +372,8 @@ def scan_all():
 
             if result is None:
                 print(f"  [AUTO] ORDER FAILED: {pair_name} {signal['direction']}")
+                _notify_error(pair_name, signal["direction"],
+                              f"MT5 rejected order")
                 continue
 
             order_id = result.get("order", "?")
@@ -294,6 +383,11 @@ def scan_all():
             print(f"  [AUTO] #{order_id} {pair_name} {signal['direction']} "
                   f"Entry={entry:.5f} SL={pos['sl_price']} TP={pos['tp_price']} "
                   f"Lot={pos['volume']}")
+
+            web_server.add_log(
+                f"<span class='hl'>{pair_name} {signal['direction']}</span> "
+                f"#{order_id} Entry={entry:.5f} Lot={pos['volume']} "
+                f"Risk={signal['risk_pct']}% Score={signal.get('score',0)}/4")
 
             # Telegram notification
             _notify_trade(pair_name, signal["direction"], entry,

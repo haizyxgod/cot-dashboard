@@ -188,6 +188,22 @@ class MT5Client:
         print(f"[MT5] SL modified #{ticket} -> {new_sl}")
         return True
 
+    def get_position_history(self, hours=24):
+        """Get closed positions from the last N hours."""
+        self.connect()
+        from datetime import datetime, timedelta
+        since = datetime.now() - timedelta(hours=hours)
+        history = mt5.history_deals_get(since, datetime.now())
+        if not history:
+            return []
+        # Filter only entry/exit deals
+        deals = []
+        for d in history:
+            if d.entry in (mt5.DEAL_ENTRY_IN, mt5.DEAL_ENTRY_OUT,
+                           mt5.DEAL_ENTRY_INOUT):
+                deals.append(d._asdict())
+        return deals
+
     def get_positions_summary(self):
         """Позиции + P&L."""
         positions = self.get_positions()
