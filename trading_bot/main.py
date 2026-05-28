@@ -14,6 +14,7 @@
 import sys
 import os
 import time
+import threading
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "cot_dashboard"))
@@ -94,7 +95,9 @@ def check_be():
     if not be_tracked:
         return
     if not mt5.connect():
+        bot_state["mt5_connected"] = False
         return
+    bot_state["mt5_connected"] = True
 
     positions = mt5.get_positions()
     pos_by_ticket = {p["ticket"]: p for p in positions}
@@ -261,13 +264,19 @@ def _notify_error(pair, direction, reason):
     _tg(f"⚠️ *{pair} {direction}* — ORDER FAILED\n{reason}")
 
 
-def scan_all():
+def scan_all(is_manual=False):
     """Главный цикл: FVG → Trend → COT → SL → сигнал."""
     print(f"\n[{datetime.now()}] === SCAN ===")
 
+    # Manual mode: skip scheduled scans
+    if not is_manual and not web_server.bot_state.get("auto_mode", True):
+        print("  Auto mode OFF — skipping scheduled scan")
+        return
+
     if not mt5.connect():
-        print("  MT5 not connected")
+        print("  MT5 not connected (reconnecting...)")
         bot_state["mt5_connected"] = False
+        web_server.add_log("MT5 connection lost — reconnecting...")
         return
 
     bot_state["mt5_connected"] = True
@@ -297,12 +306,16 @@ def scan_all():
     for pair_name, symbol in config.PAIRS.items():
 
         if symbol in occupied_symbols and not can_add_position(symbol):
+            msg = f"<span class='hl'>{pair_name}</span> — позиция без БУ, пропуск"
             print(f"  [{pair_name}] Position without BE — skip")
+            web_server.add_log(msg)
             continue
 
         last_ts = last_signal_sent.get(pair_name, 0)
         if (now_ts - last_ts) < cooldown_sec:
+            msg = f"<span class='hl'>{pair_name}</span> — кулдаун ({int((now_ts - last_ts)/3600)}h), пропуск"
             print(f"  [{pair_name}] Cooldown ({int((now_ts - last_ts)/3600)}h) — skip")
+            web_server.add_log(msg)
             continue
 
         try:
@@ -313,7 +326,9 @@ def scan_all():
             df_h4 = mt5.get_candles(symbol, "H4", 50)
 
             if df_d1.empty or df_h4.empty:
+                msg = f"<span class='hl'>{pair_name}</span> — нет данных свечей"
                 print("  No data")
+                web_server.add_log(msg)
                 continue
 
             # Stage 1: FVG direction
@@ -321,6 +336,9 @@ def scan_all():
             print(f"  FVG: D1={fvg['d1_active']} H4={fvg['h4_active']} dir={fvg['direction']}")
 
             if not fvg["direction"]:
+                msg = (f"<span class='hl'>{pair_name}</span> — нет FVG "
+                       f"(D1={'✓' if fvg['d1_active'] else '✗'} H4={'✓' if fvg['h4_active'] else '✗'})")
+                web_server.add_log(msg)
                 continue
 
             # Stage 2: COT filter
@@ -334,7 +352,10 @@ def scan_all():
             # Evaluate (FVG-first, COT+Trend as filters)
             signal = evaluate_setup(fvg, cot, trend)
             if not signal["trade"]:
+                msg = (f"<span class='hl'>{pair_name}</span> — сигнал отклонён: "
+                       f"{signal['reason']} | FVG={fvg['direction']} COT={cot['signal']} Trend={trend}")
                 print(f"  -> {signal['reason']}")
+                web_server.add_log(msg)
                 continue
 
             print(f"  -> {signal['direction']} | score={signal.get('score', 0)}/4 "
@@ -346,13 +367,17 @@ def scan_all():
             atr_val = calculate_atr(df_h4, 14)
             sl = nearest_fractal(df_h4, fvg["direction"], entry, atr_value=atr_val)
             if sl is None:
+                msg = f"<span class='hl'>{pair_name}</span> — нет фрактала для SL"
                 print("  No fractal SL")
+                web_server.add_log(msg)
                 continue
 
             acc = mt5.get_account_summary()
             info = mt5.get_symbol_info(symbol)
             if info is None:
+                msg = f"<span class='hl'>{pair_name}</span> — нет данных символа MT5"
                 print(f"  No symbol info for {symbol}")
+                web_server.add_log(msg)
                 continue
 
             balance = float(acc.get("balance", 0))
@@ -362,7 +387,9 @@ def scan_all():
                 info["trade_tick_value"]
             )
             if pos.get("error"):
+                msg = f"<span class='hl'>{pair_name}</span> — ошибка расчёта лота: {pos['error']}"
                 print(f"  Risk err: {pos['error']}")
+                web_server.add_log(msg)
                 continue
 
             # --- AUTO EXECUTE ---
@@ -422,6 +449,19 @@ if __name__ == "__main__":
     sched.start()
     print(f"[OK] Scan: every {config.SCAN_INTERVAL_MINUTES} min")
     print(f"[OK] BE monitor: every {config.TRIGGER_SCAN_SEC}s")
+
+    # Telegram polling (daemon thread)
+    from telegram_bot import start_polling
+    threading.Thread(target=start_polling, daemon=True, name="tg-polling").start()
+    print("[OK] Telegram polling started")
+
+    # Send startup message with keyboard
+    sys.stdout.flush()
+    try:
+        from telegram_bot import send_text
+        send_text("🤖 *Бот запущен* — клавиатура активна.")
+    except Exception as e:
+        print(f"[TG] Startup message failed: {e}")
 
     print("\n[Init] First scan...")
     scan_all()

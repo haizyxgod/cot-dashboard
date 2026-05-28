@@ -6,29 +6,56 @@ import config
 
 
 class MT5Client:
-    """MT5 API обёртка."""
+    """MT5 API wrapper with auto-reconnect."""
 
     def __init__(self):
         self.connected = False
+        self._reconnect_attempts = 0
+        self._max_retries = 10
+        self._base_delay = 30  # seconds
 
     def connect(self):
         if self.connected:
-            return True
+            # Verify connection is still alive
+            try:
+                info = mt5.account_info()
+                if info is None:
+                    print("[MT5] Connection lost — reconnecting...")
+                    self.connected = False
+                    mt5.shutdown()
+                else:
+                    return True
+            except Exception:
+                self.connected = False
+
+        self._reconnect_attempts += 1
+
         ok = mt5.initialize(
             login=config.MT5_LOGIN,
             password=config.MT5_PASSWORD,
             server=config.MT5_SERVER,
         )
-        if not ok:
-            print(f"[MT5] Init failed: {mt5.last_error()}")
-            return False
-        self.connected = True
-        print(f"[MT5] Connected to {config.MT5_SERVER}")
-        return True
+        if ok:
+            self.connected = True
+            self._reconnect_attempts = 0
+            print(f"[MT5] Connected to {config.MT5_SERVER}")
+            return True
+
+        # Backoff: 30s, 60s, 120s, 240s... max 10 min
+        delay = min(self._base_delay * (2 ** (self._reconnect_attempts - 1)), 600)
+        err = mt5.last_error()
+        print(f"[MT5] Connection failed (#{self._reconnect_attempts}): {err}. "
+              f"Retry in {delay}s")
+        if self._reconnect_attempts <= self._max_retries:
+            import time
+            time.sleep(delay)
+            return self.connect()  # recursive retry
+        return False
 
     def disconnect(self):
         mt5.shutdown()
         self.connected = False
+        self._reconnect_attempts = 0
 
     # --- Candles ---
 

@@ -13,7 +13,7 @@ CORS(app)
 pending_signals = {}
 database.init()
 
-bot_state = {"last_scan": None, "scan_result": "", "mt5_connected": False}
+bot_state = {"last_scan": None, "scan_result": "", "mt5_connected": False, "auto_mode": True}
 log_entries = []
 
 def add_log(msg):
@@ -114,6 +114,14 @@ HTML = r"""<!DOCTYPE html>
             <span class="status-dot {{ 'online' if state.mt5_connected else 'offline' }}"></span>
             {{ 'MT5 Online' if state.mt5_connected else 'MT5 Offline' }}
             &nbsp;|&nbsp; Скан: <b id="next-scan">--</b>
+            <button id="btn-scan" class="btn btn-ok" onclick="manualScan()" style="font-size:0.65rem;padding:3px 10px;margin-left:8px" title="Запустить сканирование">▶ Скан</button>
+            <label class="mode-toggle" title="Авто / Ручной" style="margin-left:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+                <span style="font-size:0.6rem;color:var(--muted)">АВТО</span>
+                <input type="checkbox" id="mode-switch" onchange="toggleAutoMode()" checked style="display:none">
+                <span id="mode-knob" style="display:inline-block;width:30px;height:16px;background:#00c853;border-radius:8px;position:relative;transition:background 0.2s">
+                    <span style="display:inline-block;width:12px;height:12px;background:#fff;border-radius:50%;position:absolute;top:2px;right:2px;transition:all 0.2s"></span>
+                </span>
+            </label>
         </span>
     </div>
     <div style="display:flex;align-items:center;gap:12px">
@@ -277,6 +285,7 @@ loadStats();
 <script>
 var isDashboard = {{ 'true' if tab == 'dashboard' else 'false' }};
 var scanMin = {{ scan_interval if scan_interval is defined else 180 }};
+var autoMode = {{ 'true' if auto_mode else 'false' }};
 
 function updateTimer(){
     var now=new Date(),next=new Date(now);
@@ -286,6 +295,20 @@ function updateTimer(){
     document.getElementById('clock').textContent=now.toLocaleTimeString();
 }
 setInterval(updateTimer,1000); updateTimer();
+
+// Init mode toggle
+(function initMode(){
+    var knob=document.getElementById('mode-knob');
+    var label=document.getElementById('mode-switch').parentElement.querySelector('span');
+    if(!autoMode){
+        document.getElementById('mode-switch').checked=false;
+        knob.style.background='#ff5252';
+        knob.querySelector('span').style.right='16px';
+        label.textContent='РУЧН';
+        document.getElementById('next-scan').style.opacity='0.4';
+        document.getElementById('btn-scan').style.opacity='1';
+    }
+})();
 
 var theme=localStorage.getItem('theme')||'dark';
 document.documentElement.setAttribute('data-theme',theme);
@@ -310,6 +333,42 @@ async function submitAction(url){
         if(d.ok){showToast('Готово',d.msg,'ok')}else{showToast('Ошибка',d.msg,'err')}
         setTimeout(function(){if(isDashboard)refresh();else window.location.reload()},800);
     }catch(e){showToast('Ошибка','Не удалось выполнить','err')}
+}
+
+async function manualScan(){
+    var btn=document.getElementById('btn-scan');
+    btn.disabled=true; btn.textContent='...';
+    try{
+        var r=await fetch('/bot/scan',{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'}});
+        var d=await r.json();
+        showToast(d.ok?'Скан':'Ошибка',d.msg,d.ok?'ok':'err');
+    }catch(e){showToast('Ошибка','Скан не удался','err')}
+    btn.disabled=false; btn.textContent='▶ Скан';
+    if(isDashboard) refresh();
+}
+
+async function toggleAutoMode(){
+    try{
+        var r=await fetch('/bot/mode',{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'}});
+        var d=await r.json();
+        var knob=document.getElementById('mode-knob');
+        var label=document.getElementById('mode-switch').parentElement.querySelector('span');
+        if(d.auto_mode){
+            knob.style.background='#00c853';
+            knob.querySelector('span').style.right='2px';
+            label.textContent='АВТО';
+            document.getElementById('next-scan').style.opacity='1';
+            document.getElementById('btn-scan').style.opacity='0.5';
+        }else{
+            knob.style.background='#ff5252';
+            knob.querySelector('span').style.right='16px';
+            label.textContent='РУЧН';
+            document.getElementById('next-scan').style.opacity='0.4';
+            document.getElementById('btn-scan').style.opacity='1';
+        }
+        showToast('Режим',d.msg,'ok');
+        if(isDashboard) refresh();
+    }catch(e){showToast('Ошибка','Не удалось переключить','err')}
 }
 
 var refreshCount=0;
@@ -648,7 +707,8 @@ def export_csv():
 def dashboard():
     return render_template_string(HTML, state=bot_state, tab="dashboard",
                                   positions=[], history=[], total_pnl=0, count=0,
-                                  scan_interval=180, pair_filter="", date_filter="")
+                                  scan_interval=180, pair_filter="", date_filter="",
+                                  auto_mode=bot_state.get("auto_mode", True))
 
 
 @app.route("/bot/positions")
@@ -834,6 +894,24 @@ def close_all():
         add_log(f"Ошибка: {e}")
     return "<script>window.location='/bot/positions'</script>"
 
+
+@app.route("/bot/scan", methods=["POST"])
+def trigger_scan():
+    """Trigger a manual scan now."""
+    try:
+        import main as _main
+        _main.scan_all(is_manual=True)
+        return {"ok": True, "msg": "Скан выполнен — проверьте лог"}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.route("/bot/mode", methods=["POST"])
+def toggle_mode():
+    """Toggle between auto and manual scan mode."""
+    bot_state["auto_mode"] = not bot_state.get("auto_mode", True)
+    mode = "авто" if bot_state["auto_mode"] else "ручной"
+    add_log(f"Режим переключён: <b>{mode}</b>")
+    return {"ok": True, "auto_mode": bot_state["auto_mode"], "msg": f"Режим: {mode}"}
 
 @app.route("/bot/accept/<sig_id>", methods=["POST"])
 def accept(sig_id):
