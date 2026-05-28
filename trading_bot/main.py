@@ -90,6 +90,33 @@ last_signal_sent = {}
 be_tracked = {}
 
 
+def init_be_tracking():
+    """Restore BE tracking for open positions after restart."""
+    if not mt5.connect():
+        return
+    positions = mt5.get_positions()
+    for p in positions:
+        ticket = p["ticket"]
+        entry = p.get("price_open", p.get("open_price", 0))
+        sl = float(p.get("sl", 0))
+        direction = "BUY" if p["type"] == 0 else "SELL"
+        symbol = p["symbol"]
+
+        # If SL is already at entry (within 0.01%), BE was triggered before restart
+        already_be = abs(sl - entry) < abs(entry) * 0.0001 if entry else False
+
+        be_tracked[ticket] = {
+            "symbol": symbol,
+            "entry_price": entry,
+            "direction": direction,
+            "be_triggered": already_be,
+        }
+        tag = "BE" if already_be else "tracking"
+        print(f"[BE] Restored #{ticket} {symbol} {direction} entry={entry} ({tag})")
+    mt5.disconnect()
+    print(f"[BE] Restored {len(be_tracked)} positions from MT5")
+
+
 def check_be():
     """Monitor open positions for H4 fractal breakout → move SL to entry."""
     if not be_tracked:
@@ -462,6 +489,9 @@ if __name__ == "__main__":
         send_text("🤖 *Бот запущен* — клавиатура активна.")
     except Exception as e:
         print(f"[TG] Startup message failed: {e}")
+
+    print("\n[Init] Restoring BE state...")
+    init_be_tracking()
 
     print("\n[Init] First scan...")
     scan_all()
