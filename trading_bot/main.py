@@ -20,6 +20,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "cot_dashboard"))
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from mt5_client import client as mt5
 from fvg_detector import check_fvg_signals
 from fractal_detector import nearest_fractal, calculate_atr, find_fractals
@@ -333,7 +334,7 @@ def scan_all(is_manual=False):
     for pair_name, symbol in config.PAIRS.items():
 
         if symbol in occupied_symbols and not can_add_position(symbol):
-            msg = f"<span class='hl'>{pair_name}</span> — позиция без БУ, пропуск"
+            msg = f"<span class='hl'>{pair_name}</span> — позиция без BE, пропуск"
             print(f"  [{pair_name}] Position without BE — skip")
             web_server.add_log(msg)
             continue
@@ -469,12 +470,12 @@ if __name__ == "__main__":
     web_server.start_web()
 
     sched = BackgroundScheduler()
-    sched.add_job(scan_all, "interval", minutes=config.SCAN_INTERVAL_MINUTES,
+    sched.add_job(scan_all, CronTrigger(hour="*/3", minute=0),
                   id="scan")
     sched.add_job(check_be, "interval", seconds=config.TRIGGER_SCAN_SEC,
                   id="be_monitor")
     sched.start()
-    print(f"[OK] Scan: every {config.SCAN_INTERVAL_MINUTES} min")
+    print("[OK] Scan: at 0:00, 3:00, 6:00, 9:00, 12:00, 15:00, 18:00, 21:00")
     print(f"[OK] BE monitor: every {config.TRIGGER_SCAN_SEC}s")
 
     # Telegram polling (daemon thread)

@@ -142,7 +142,7 @@ HTML = r"""<!DOCTYPE html>
 {% if tab == 'dashboard' %}
 <div class="cards" id="cards">
     <div class="card"><div class="label">Баланс</div><div class="value" id="bal">--</div><div class="sub">Equity: <span id="eq">--</span></div></div>
-    <div class="card"><div class="label">Открыто позиций</div><div class="value" id="pos-count">--</div><div class="sub">БУ: <span id="be-count">--</span></div></div>
+    <div class="card"><div class="label">Открыто позиций</div><div class="value" id="pos-count">--</div><div class="sub">BE: <span id="be-count">--</span></div></div>
     <div class="card"><div class="label">P&L (открытые)</div><div class="value" id="open-pnl">--</div><div class="sub" id="pnl-sub"></div></div>
     <div class="card"><div class="label">P&L (закрытые)</div><div class="value" id="closed-pnl">--</div><div class="sub" id="closed-sub"></div></div>
     <div class="card"><div class="label">P&L Сегодня</div><div class="value" id="daily-pnl">--</div><div class="sub" id="daily-sub"></div></div>
@@ -193,11 +193,11 @@ HTML = r"""<!DOCTYPE html>
             {% if p.get('sl') %} | SL: <span style="color:#ff5252">{{ p.sl }}</span>{% endif %}
             {% if p.get('tp') %} | TP: <span style="color:#00e676">{{ p.tp }}</span>{% endif %}
         </div>
-        {% if p.get('be_triggered') %}<span class="be-badge be-active">БУ</span>{% endif %}
+        {% if p.get('be_triggered') %}<span class="be-badge be-active">BE</span>{% endif %}
         <div class="pnl {{ 'pos' if p.profit > 0 else 'neg' }}">${{ '{:+.2f}'.format(p.profit) }}</div>
         <div style="display:flex;gap:4px">
             {% if not p.get('be_triggered') %}
-            <form onsubmit="event.preventDefault();submitAction('/bot/be/{{ p.ticket }}')" style="margin:0"><button class="btn btn-out" style="font-size:0.75rem;padding:6px 14px">БУ</button></form>
+            <form onsubmit="event.preventDefault();submitAction('/bot/be/{{ p.ticket }}')" style="margin:0"><button class="btn btn-out" style="font-size:0.75rem;padding:6px 14px">BE</button></form>
             {% endif %}
             <form onsubmit="event.preventDefault();submitAction('/bot/close/{{ p.ticket }}')" style="margin:0"><button class="btn" style="background:#ff5252;color:#fff;font-size:0.75rem;padding:6px 14px">✕</button></form>
         </div>
@@ -250,7 +250,7 @@ async function loadStats(){
         Object.keys(d).sort().forEach(function(pair){
             var s=d[pair];
             var cards=[
-                ['Сделок',s.trades+' ('+s.be+' БУ)'],
+                ['Сделок',s.trades+' ('+s.be+' BE)'],
                 ['Win Rate',s.win_rate+'%'],
                 ['Wins / Losses',s.wins+' / '+s.losses],
                 ['P&L','$'+(s.total_pnl>=0?'+':'')+s.total_pnl.toFixed(0)],
@@ -288,8 +288,14 @@ var scanMin = {{ scan_interval if scan_interval is defined else 180 }};
 var autoMode = {{ 'true' if auto_mode else 'false' }};
 
 function updateTimer(){
-    var now=new Date(),next=new Date(now);
-    next.setMinutes(Math.ceil(now.getMinutes()/scanMin)*scanMin,0,0);
+    var now=new Date(), next=new Date(now);
+    var h = now.getHours();
+    var nextHour = h - (h % 3) + 3;
+    if (nextHour >= 24) {
+        nextHour = 0;
+        next.setDate(next.getDate() + 1);
+    }
+    next.setHours(nextHour, 0, 0, 0);
     var d=Math.floor((next-now)/1000);
     document.getElementById('next-scan').textContent=Math.floor(d/3600)+'h '+Math.floor(d%3600/60)+'m';
     document.getElementById('clock').textContent=now.toLocaleTimeString();
@@ -450,7 +456,7 @@ async function refresh(){
     var opnEl=document.getElementById('open-pnl');
     opnEl.textContent='$'+(opnl>=0?'+':'')+opnl.toFixed(2);
     opnEl.className='value '+(opnl>=0?'val-green':'val-red');
-    document.getElementById('pnl-sub').textContent=(opp>=0?'+':'')+opp.toFixed(2)+'% | '+s.be_count+'/'+s.positions_count+' в БУ';
+    document.getElementById('pnl-sub').textContent=(opp>=0?'+':'')+opp.toFixed(2)+'% | '+s.be_count+'/'+s.positions_count+' in BE';
     var cpnl=s.closed_pnl, cpp=cpnl/s.balance*100||0;
     var cpnlEl=document.getElementById('closed-pnl');
     cpnlEl.textContent='$'+(cpnl>=0?'+':'')+cpnl.toFixed(2);
@@ -498,10 +504,10 @@ async function refresh(){
             var dur=pos.duration||'';
             var slDist=pos.sl_dist_pct||0, tpDist=pos.tp_dist_pct||0;
             var beHtml=pos.be_triggered?
-                '<span class="be-badge be-active">БУ</span>':
+                '<span class="be-badge be-active">BE</span>':
                 '<span class="be-badge be-waiting">SL</span>';
             var btns='<div style="display:flex;gap:5px;margin-left:6px">';
-            if(!pos.be_triggered) btns+='<button class="btn btn-out" onclick="submitAction(\'/bot/be/'+pos.ticket+'\')" style="font-size:0.75rem;padding:6px 14px">БУ</button>';
+            if(!pos.be_triggered) btns+='<button class="btn btn-out" onclick="submitAction(\'/bot/be/'+pos.ticket+'\')" style="font-size:0.75rem;padding:6px 14px">BE</button>';
             btns+='<button class="btn" onclick="submitAction(\'/bot/close/'+pos.ticket+'\')" style="background:#ff5252;color:#fff;font-size:0.75rem;padding:6px 14px">✕</button></div>';
             html+='<div class="pos-row">'+
                 '<div class="pair">'+pos.symbol+'</div>'+
@@ -544,7 +550,7 @@ if(isDashboard){ refresh(); setInterval(refresh,10000); }
 def api_positions():
     try:
         from mt5_client import client as mt5
-        import main as _main
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
         mt5.connect()
         positions = mt5.get_positions()
         mt5.disconnect()
@@ -594,7 +600,7 @@ def api_positions():
 def api_stats():
     try:
         from mt5_client import client as mt5
-        import main as _main
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
         mt5.connect()
         acc = mt5.get_account_summary()
         positions = mt5.get_positions()
@@ -715,7 +721,7 @@ def dashboard():
 def positions_page():
     try:
         from mt5_client import client as mt5
-        import main as _main
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
         mt5.connect()
         summary = mt5.get_positions_summary()
         positions = summary["positions"]
@@ -849,7 +855,7 @@ def move_to_be(ticket):
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     try:
         from mt5_client import client as mt5
-        import main as _main
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
         mt5.connect()
         pos = mt5.get_positions()
         target = None
@@ -865,15 +871,15 @@ def move_to_be(ticket):
             in_profit = (ptype == 0 and current > entry) or (ptype == 1 and current < entry)
             if not in_profit:
                 mt5.disconnect()
-                if is_ajax: return jsonify({"ok": False, "msg": "БУ недоступен: позиция не в плюсе"})
-                return "<script>alert('БУ недоступен: позиция не в плюсе');window.location='/bot/positions'</script>"
+                if is_ajax: return jsonify({"ok": False, "msg": "BE недоступен: позиция не в плюсе"})
+                return "<script>alert('BE недоступен: позиция не в плюсе');window.location='/bot/positions'</script>"
             ok = mt5.modify_sl(ticket, entry)
             if ok:
                 _main.be_tracked[ticket] = {"be_triggered": True, "entry_price": entry,
                                               "symbol": target["symbol"],
                                               "direction": "BUY" if target["type"] == 0 else "SELL"}
                 add_log(f"#{ticket} SL → BE ({entry})")
-                if is_ajax: return jsonify({"ok": True, "msg": f"#{ticket} → БУ"})
+                if is_ajax: return jsonify({"ok": True, "msg": f"#{ticket} → BE"})
             else:
                 if is_ajax: return jsonify({"ok": False, "msg": f"Не удалось изменить SL #{ticket}"})
         mt5.disconnect()
@@ -899,7 +905,7 @@ def close_all():
 def trigger_scan():
     """Trigger a manual scan now."""
     try:
-        import main as _main
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
         _main.scan_all(is_manual=True)
         return {"ok": True, "msg": "Скан выполнен — проверьте лог"}
     except Exception as e:

@@ -141,7 +141,7 @@ def cmd_status():
         f" ┣ Баланс: `${balance:,.2f}`\n"
         f" ┣ Equity: `${equity:,.2f}`\n"
         f" ┣ {pnl_emoji} Открытый P&L: `{open_pnl:+,.2f}`\n"
-        f" ┣ Позиций: *{pos_count}* | В БУ: *{be_count}*\n"
+        f" ┣ Позиций: *{pos_count}* | В BE: *{be_count}*\n"
         f" ┣ Последний скан: `{last_scan}`\n"
         f" ┗ Пары: {', '.join(config.PAIRS.keys())}"
     )
@@ -164,6 +164,14 @@ def cmd_positions():
     if not positions:
         return None, "📋 Нет открытых позиций."
 
+    # Get BE state from main module
+    try:
+        import sys
+        _main = sys.modules.get("__main__", sys.modules.get("main"))
+        be_tracked = getattr(_main, "be_tracked", {})
+    except Exception:
+        be_tracked = {}
+
     keyboard = {"inline_keyboard": []}
     lines = ["*📋 Позиции*"]
     for p in positions:
@@ -171,19 +179,34 @@ def cmd_positions():
         symbol = p["symbol"]
         ptype = "🟢 BUY" if p["type"] == 0 else "🔴 SELL"
         entry = p.get("price_open", p.get("open_price", 0))
-        sl = p.get("sl", 0)
-        tp = p.get("tp", 0)
+        sl = float(p.get("sl", 0))
+        tp = float(p.get("tp", 0))
         profit = float(p.get("profit", 0))
+
+        # Check if BE: from tracked state OR SL already at entry
+        be_info = be_tracked.get(ticket, {})
+        is_be = be_info.get("be_triggered", False)
+        if not is_be and entry:
+            is_be = abs(sl - entry) < abs(entry) * 0.0001
+
+        be_tag = " 🟡BE" if is_be else ""
         pnl_sign = "+" if profit >= 0 else ""
+
+        entry_str = f"`{entry}`"
+        sl_str = f"`{sl}`"
+        if is_be:
+            sl_str = f"`{sl}` 🟡BE"
+
         lines.append(
-            f" ┣ *{symbol}* {ptype} #{ticket}\n"
-            f" ┃ Entry: `{entry}` | SL: `{sl}` | TP: `{tp}`\n"
+            f" ┣ *{symbol}* {ptype} #{ticket}{be_tag}\n"
+            f" ┃ Entry: {entry_str} | SL: {sl_str} | TP: `{tp}`\n"
             f" ┃ P&L: `{pnl_sign}{profit:.2f}`"
         )
-        keyboard["inline_keyboard"].append([
-            {"text": f"🟡 BE #{ticket}", "callback_data": f"be_{ticket}"},
-            {"text": f"❌ Закрыть #{ticket}", "callback_data": f"close_{ticket}"},
-        ])
+        row = []
+        if not is_be:
+            row.append({"text": f"🟡 BE #{ticket}", "callback_data": f"be_{ticket}"})
+        row.append({"text": f"❌ Закрыть #{ticket}", "callback_data": f"close_{ticket}"})
+        keyboard["inline_keyboard"].append(row)
     lines[-1] = lines[-1].replace(" ┣", " ┗")
 
     return keyboard, "\n".join(lines)
@@ -224,7 +247,7 @@ def cmd_today():
 def cmd_scan():
     """🔍 Trigger manual scan."""
     try:
-        import main as _main
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
         _main.scan_all(is_manual=True)
         return "🔍 Скан выполнен — проверьте дашборд."
     except Exception as e:
