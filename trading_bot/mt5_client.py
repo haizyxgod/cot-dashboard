@@ -13,6 +13,8 @@ class MT5Client:
         self._reconnect_attempts = 0
         self._max_retries = 10
         self._base_delay = 30  # seconds
+        import threading
+        self._lock = threading.Lock()
 
     def connect(self):
         if self.connected:
@@ -53,9 +55,10 @@ class MT5Client:
         return False
 
     def disconnect(self):
-        mt5.shutdown()
-        self.connected = False
-        self._reconnect_attempts = 0
+        with self._lock:
+            mt5.shutdown()
+            self.connected = False
+            self._reconnect_attempts = 0
 
     # --- Candles ---
 
@@ -153,9 +156,10 @@ class MT5Client:
 
     def get_positions(self, symbol=None):
         """Открытые позиции."""
-        self.connect()
-        positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
-        return [p._asdict() for p in positions] if positions else []
+        with self._lock:
+            self.connect()
+            positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+            return [p._asdict() for p in positions] if positions else []
 
     def close_position(self, ticket):
         """Закрывает одну позицию по тикету."""
@@ -223,13 +227,40 @@ class MT5Client:
         history = mt5.history_deals_get(since, datetime.now())
         if not history:
             return []
-        # Filter only entry/exit deals
-        deals = []
-        for d in history:
-            if d.entry in (mt5.DEAL_ENTRY_IN, mt5.DEAL_ENTRY_OUT,
-                           mt5.DEAL_ENTRY_INOUT):
-                deals.append(d._asdict())
+        deals = [d._asdict() for d in history]
         return deals
+
+    def get_closed_trade_pnl(self, ticket, hours=72, symbol=None, entry_price=None):
+        """Get realized P&L for a closed position by its position_id.
+        NOTE: OANDA MT5 ignores the position= filter in history_deals_get,
+        so we must fetch all deals and filter manually."""
+        self.connect()
+        from datetime import datetime, timedelta
+        since = datetime.now() - timedelta(hours=hours)
+        now = datetime.now()
+
+        all_deals = mt5.history_deals_get(since, now)
+        if not all_deals:
+            return 0.0, 0.0, 0.0
+
+        # Filter deals by position_id manually (position= param is broken in OANDA MT5)
+        matching = [d for d in all_deals if d.position_id == ticket]
+        if not matching:
+            return 0.0, 0.0, 0.0
+
+        # Verify entry price matches (safety check)
+        if symbol and entry_price:
+            entry_deals = [d for d in matching if d.entry == 0]
+            if entry_deals:
+                deal_entry = entry_deals[0].price
+                if deal_entry > 0 and abs(deal_entry - entry_price) > entry_price * 0.02:
+                    return 0.0, 0.0, 0.0
+
+        pnl = sum(d.profit for d in matching)
+        exit_deals = [d for d in matching if d.entry == 1]
+        exit_price = exit_deals[-1].price if exit_deals else 0
+        volume = max((d.volume for d in matching), default=0)
+        return pnl, exit_price, volume
 
     def get_positions_summary(self):
         """Позиции + P&L."""
@@ -239,11 +270,12 @@ class MT5Client:
 
     def get_account_summary(self):
         """Баланс, equity."""
-        self.connect()
-        info = mt5.account_info()
-        if info is None:
-            return {"balance": 0, "equity": 0}
-        return {"balance": info.balance, "equity": info.equity}
+        with self._lock:
+            self.connect()
+            info = mt5.account_info()
+            if info is None:
+                return {"balance": 0, "equity": 0}
+            return {"balance": info.balance, "equity": info.equity}
 
     # --- Symbol helpers ---
 

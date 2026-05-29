@@ -149,9 +149,6 @@ HTML = r"""<!DOCTYPE html>
     <div class="card"><div class="label">Лучшая / Худшая</div><div class="value" style="font-size:0.9rem"><span id="best-trade" style="color:#00e676">--</span> / <span id="worst-trade" style="color:#ff5252">--</span></div><div class="sub">сделка</div></div>
 </div>
 
-<div class="section-title">Equity</div>
-<canvas id="equity-canvas" height="180"></canvas>
-
 <div class="section-title">P&amp;L по месяцам</div>
 <div style="overflow-x:auto">
 <table class="monthly-table" id="monthly-table"><tbody><tr><td colspan="13">Загрузка...</td></tr></tbody></table>
@@ -379,32 +376,6 @@ async function toggleAutoMode(){
 
 var refreshCount=0;
 
-function drawEquity(data){
-    var c=document.getElementById('equity-canvas');
-    if(!c||!data||data.length<2)return;
-    var ctx=c.getContext('2d'),w=c.parentElement.clientWidth-24;
-    c.width=w;c.height=180;
-    var min=data[0],max=data[0];
-    data.forEach(function(d){if(d<min)min=d;if(d>max)max=d;});
-    var pad=(max-min)*0.1||1000;
-    ctx.clearRect(0,0,w,180);
-    ctx.beginPath();ctx.strokeStyle='#21262d';ctx.lineWidth=1;
-    for(var i=0;i<5;i++){var y=20+i*40;ctx.moveTo(0,y);ctx.lineTo(w,y);}ctx.stroke();
-
-    ctx.beginPath();ctx.strokeStyle='#00e676';ctx.lineWidth=2;
-    data.forEach(function(v,i){
-        var x=i/(data.length-1)*w;
-        var y=180-((v-(min-pad))/(max-min+2*pad))*180;
-        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
-    });
-    ctx.stroke();
-
-    // Baseline at start
-    var baseY=180-((data[0]-(min-pad))/(max-min+2*pad))*180;
-    ctx.beginPath();ctx.strokeStyle='#30363d';ctx.setLineDash([4,4]);ctx.lineWidth=1;
-    ctx.moveTo(0,baseY);ctx.lineTo(w,baseY);ctx.stroke();ctx.setLineDash([]);
-}
-
 function buildMonthlyTable(months){
     var t=document.getElementById('monthly-table');
     if(!t)return;
@@ -469,9 +440,6 @@ async function refresh(){
     document.getElementById('daily-sub').textContent=(dpp>=0?'+':'')+dpp.toFixed(2)+'% сегодня';
     document.getElementById('best-trade').textContent='$'+(s.best_trade||0).toFixed(0);
     document.getElementById('worst-trade').textContent='$'+(s.worst_trade||0).toFixed(0);
-
-    // Equity graph
-    if(s.equity_history) drawEquity(s.equity_history);
 
     // Monthly P&L
     if(s.monthly_pnl) buildMonthlyTable(s.monthly_pnl);
@@ -601,6 +569,7 @@ def api_stats():
     try:
         from mt5_client import client as mt5
         import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
+
         mt5.connect()
         acc = mt5.get_account_summary()
         positions = mt5.get_positions()
@@ -610,47 +579,38 @@ def api_stats():
         be_count = sum(1 for p in positions
                        if _main.be_tracked.get(p["ticket"], {}).get("be_triggered"))
         orders = database.get_order_history(5000)
-        total_trades = len(orders)
-        wins = sum(1 for o in orders if o.get("result") == "win")
-        losses = sum(1 for o in orders if o.get("result") == "loss")
-        closed_pnl = sum(o.get("pnl", 0) for o in orders if o.get("pnl"))
+        closed_orders = [o for o in orders if o.get("result") in ("win", "loss", "be")]
+        total_trades = len(closed_orders)
+        wins = sum(1 for o in closed_orders if o.get("result") == "win")
+        losses = sum(1 for o in closed_orders if o.get("result") == "loss")
+        closed_pnl = sum(o.get("pnl", 0) for o in closed_orders)
         wr = wins / (wins + losses) * 100 if (wins + losses) > 0 else 0
 
         today = datetime.now().strftime("%Y-%m-%d")
-        daily_pnl = sum(o.get("pnl", 0) for o in orders if o.get("time", "").startswith(today))
+        daily_pnl = sum(o.get("pnl", 0) for o in closed_orders if (o.get("time") or "").startswith(today))
 
         # Best/worst trade
-        pnls = [o.get("pnl", 0) for o in orders if o.get("pnl")]
+        pnls = [o.get("pnl", 0) for o in closed_orders]
         best = max(pnls) if pnls else 0
         worst = min(pnls) if pnls else 0
 
         # Day-of-week
         dow_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
         dow_pnl = {d: 0.0 for d in dow_names}
-        for o in orders:
+        for o in closed_orders:
             t = o.get("time", "")
-            if t and o.get("pnl"):
+            if t:
                 try:
                     dt = datetime.fromisoformat(t[:19])
-                    dow_pnl[dow_names[dt.weekday()]] += o["pnl"]
+                    dow_pnl[dow_names[dt.weekday()]] += o.get("pnl", 0)
                 except: pass
 
         # Monthly P&L
         monthly_pnl = {}
-        for o in orders:
+        for o in closed_orders:
             t = o.get("time", "")
-            if t and o.get("pnl"):
-                monthly_pnl[t[:7]] = monthly_pnl.get(t[:7], 0) + o["pnl"]
-
-        # Equity history (cumulative P&L over time from closed trades)
-        equity_history = []
-        cum = 0
-        for o in reversed(orders):
-            if o.get("pnl"):
-                cum += o["pnl"]
-                equity_history.append(round(o.get("balance", cum), 2))
-        if not equity_history and orders:
-            equity_history = [acc.get("balance", 0)]
+            if t:
+                monthly_pnl[t[:7]] = monthly_pnl.get(t[:7], 0) + o.get("pnl", 0)
 
         bal = acc.get("balance", 0)
         open_pnl_pct = round(open_pnl / bal * 100, 2) if bal > 0 else 0
@@ -664,7 +624,6 @@ def api_stats():
             "win_rate": wr, "daily_pnl": daily_pnl, "daily_pnl_pct": daily_pnl_pct,
             "best_trade": best, "worst_trade": worst,
             "dow_pnl": dow_pnl, "monthly_pnl": monthly_pnl,
-            "equity_history": equity_history,
         })
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -823,6 +782,8 @@ def history_page():
     pair_filter = request.args.get("pair", "")
     date_filter = request.args.get("date", "")
     hist = database.get_order_history(500)
+    # Only show trades with a result (closed)
+    hist = [h for h in hist if h.get("result") in ("win", "loss", "be")]
     if pair_filter:
         hist = [h for h in hist if h.get("pair", "") == pair_filter]
     if date_filter:
@@ -837,11 +798,49 @@ def close_one(ticket):
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     try:
         from mt5_client import client as mt5
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
+        info = _main.be_tracked.get(ticket, {})
         mt5.connect()
+        # Capture live P&L BEFORE closing
+        live_pnl = 0
+        for p in mt5.get_positions():
+            if p["ticket"] == ticket:
+                live_pnl = p.get("profit", 0)
+                break
         ok = mt5.close_position(ticket)
+        if ok:
+            # Log closed trade immediately
+            try:
+                entry_price = info.get("entry_price", 0)
+                symbol = info.get("symbol", "")
+                # Use live P&L if available, fall back to history
+                pnl = live_pnl if live_pnl != 0 else info.get("last_profit", 0)
+                if pnl == 0:
+                    pnl, exit_price, volume = mt5.get_closed_trade_pnl(
+                        ticket, hours=72, symbol=symbol, entry_price=entry_price)
+                else:
+                    exit_price, volume = 0, 0
+                if abs(pnl) > 0.01:
+                    result = "win" if pnl > 0 else "loss"
+                else:
+                    result = "be"
+                if info:
+                    direction = info.get("direction", "?")
+                    pair = _main.symbol_to_pair(symbol) if hasattr(_main, 'symbol_to_pair') else symbol
+                    database.save_closed_trade(
+                        ticket=ticket, pair=pair, direction=direction,
+                        entry_price=entry_price, sl_price=info.get("sl", 0),
+                        tp_price=info.get("tp", 0), volume=0,
+                        pnl=pnl, result=result, exit_price=0,
+                        open_time=str(datetime.now()))
+                    _main.be_tracked.pop(ticket, None)
+                    database.clear_be_ticket(ticket)
+                    database.save_be_state(_main.be_tracked)
+                add_log(f"#{ticket} {result.upper()} ${pnl:+.2f}")
+            except Exception as e:
+                add_log(f"Закрыта позиция #{ticket} (лог: {e})")
         mt5.disconnect()
         if ok:
-            add_log(f"Закрыта позиция #{ticket}")
             if is_ajax: return jsonify({"ok": True, "msg": f"#{ticket} закрыта"})
         else:
             if is_ajax: return jsonify({"ok": False, "msg": f"Не удалось закрыть #{ticket}"})
@@ -892,8 +891,34 @@ def move_to_be(ticket):
 def close_all():
     try:
         from mt5_client import client as mt5
+        import sys; _main = sys.modules.get("__main__", sys.modules.get("main"))
         mt5.connect()
+        # Capture be_tracked before closing (so we can log each)
+        tracked_before = dict(_main.be_tracked)
         n = mt5.close_all_positions()
+        # Log each closed position
+        for ticket, info in tracked_before.items():
+            try:
+                symbol = info.get("symbol", "")
+                entry_price = info.get("entry_price", 0)
+                pnl, exit_price, volume = mt5.get_closed_trade_pnl(
+                    ticket, hours=72, symbol=symbol, entry_price=entry_price)
+                if abs(pnl) > 0.01:
+                    result = "win" if pnl > 0 else "loss"
+                else:
+                    result = "be"
+                pair = _main.symbol_to_pair(symbol) if hasattr(_main, 'symbol_to_pair') else symbol
+                database.save_closed_trade(
+                    ticket=ticket, pair=pair, direction=info.get("direction", "?"),
+                    entry_price=info.get("entry_price", 0),
+                    sl_price=info.get("sl", 0), tp_price=info.get("tp", 0),
+                    volume=0, pnl=pnl, result=result, exit_price=0,
+                    open_time=str(datetime.now()))
+                _main.be_tracked.pop(ticket, None)
+                database.clear_be_ticket(ticket)
+            except Exception as e:
+                print(f"[LOG] Error logging #{ticket}: {e}")
+        database.save_be_state(_main.be_tracked)
         mt5.disconnect()
         add_log(f"Закрыто позиций: {n}")
     except Exception as e:

@@ -23,6 +23,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from mt5_client import client as mt5
 from fvg_detector import check_fvg_signals
+import db as database
 from fractal_detector import nearest_fractal, calculate_atr, find_fractals
 from signal_engine import evaluate_setup
 from risk_manager import calculate_lot
@@ -92,20 +93,40 @@ be_tracked = {}
 
 
 def init_be_tracking():
-    """Restore BE tracking for open positions after restart."""
+    """Restore BE tracking for open positions after restart.
+    Also log any positions that closed while the bot was down."""
     if not mt5.connect():
         return
+
     positions = mt5.get_positions()
+    pos_by_ticket = {p["ticket"]: p for p in positions}
+
+    # Load saved BE state from DB (persisted across restarts)
+    saved_state = database.load_be_state()
+
+    # Check saved positions: if closed during downtime, log them
+    for ticket, info in saved_state.items():
+        if ticket not in pos_by_ticket:
+            # Position closed while bot was down — retroactively log
+            print(f"[BE] Position #{ticket} {info['symbol']} closed during downtime — logging")
+            _log_closed_trade(ticket, info)
+            database.clear_be_ticket(ticket)
+        else:
+            # Restore from saved state (preserves be_triggered flag)
+            be_tracked[ticket] = info
+            tag = "BE" if info.get("be_triggered") else "tracking"
+            print(f"[BE] Restored #{ticket} {info['symbol']} {info['direction']} ({tag})")
+
+    # Also track open positions not yet in saved state (new or legacy)
     for p in positions:
         ticket = p["ticket"]
+        if ticket in be_tracked:
+            continue  # already restored above
         entry = p.get("price_open", p.get("open_price", 0))
         sl = float(p.get("sl", 0))
         direction = "BUY" if p["type"] == 0 else "SELL"
         symbol = p["symbol"]
-
-        # If SL is already at entry (within 0.01%), BE was triggered before restart
         already_be = abs(sl - entry) < abs(entry) * 0.0001 if entry else False
-
         be_tracked[ticket] = {
             "symbol": symbol,
             "entry_price": entry,
@@ -114,12 +135,14 @@ def init_be_tracking():
         }
         tag = "BE" if already_be else "tracking"
         print(f"[BE] Restored #{ticket} {symbol} {direction} entry={entry} ({tag})")
+
+    database.save_be_state(be_tracked)
     mt5.disconnect()
-    print(f"[BE] Restored {len(be_tracked)} positions from MT5")
+    print(f"[BE] Restored {len(be_tracked)} positions total")
 
 
 def check_be():
-    """Monitor open positions for H4 fractal breakout → move SL to entry."""
+    """Monitor open positions: capture live P&L, detect closes, check BE."""
     if not be_tracked:
         return
     if not mt5.connect():
@@ -130,17 +153,24 @@ def check_be():
     positions = mt5.get_positions()
     pos_by_ticket = {p["ticket"]: p for p in positions}
 
-    for ticket, info in list(be_tracked.items()):
-        if info.get("be_triggered"):
-            continue  # already moved to BE
+    # Save live P&L for all tracked positions
+    for p in positions:
+        ticket = p["ticket"]
+        if ticket in be_tracked:
+            be_tracked[ticket]["last_profit"] = p.get("profit", 0)
 
+    for ticket, info in list(be_tracked.items()):
         if ticket not in pos_by_ticket:
-            # Position closed — log to DB
+            # Position closed — use last known live profit
             _log_closed_trade(ticket, info)
             be_tracked.pop(ticket, None)
+            database.clear_be_ticket(ticket)
             continue
 
         pos = pos_by_ticket[ticket]
+
+        if info.get("be_triggered"):
+            continue  # already moved to BE
         symbol = info["symbol"]
         entry = info["entry_price"]
         direction = info["direction"]
@@ -185,6 +215,7 @@ def check_be():
         except Exception as e:
             print(f"[BE] Error ticket #{ticket}: {e}")
 
+    database.save_be_state(be_tracked)
     mt5.disconnect()
 
 
@@ -192,21 +223,21 @@ def _log_closed_trade(ticket, info):
     """When a position closes, determine result and save to DB."""
     try:
         from datetime import datetime
-        deals = mt5.get_position_history(hours=48)
         entry_price = info["entry_price"]
         direction = info["direction"]
         symbol = info["symbol"]
-        pnl = 0
-        exit_price = 0
-        volume = 0
 
-        # Find matching deal
-        for d in deals:
-            if d.get("position_id") == ticket or d.get("order") == ticket:
-                pnl += d.get("profit", 0)
-                if d.get("price") and d.get("price") != entry_price:
-                    exit_price = d["price"]
-                volume = d.get("volume", volume)
+        # Use last known live profit if available (more reliable than history)
+        last_profit = info.get("last_profit", 0)
+        if last_profit != 0:
+            pnl = last_profit
+            exit_price = 0
+            volume = 0
+            print(f"[LOG] #{ticket}: using live P&L = {pnl:.2f}")
+        else:
+            pnl, exit_price, volume = mt5.get_closed_trade_pnl(
+                ticket, hours=72, symbol=symbol, entry_price=entry_price)
+            print(f"[LOG] #{ticket}: history P&L = {pnl:.2f}")
 
         if exit_price == 0:
             exit_price = entry_price
@@ -219,7 +250,6 @@ def _log_closed_trade(ticket, info):
         else:
             result = "be"
 
-        import db as database
         database.save_closed_trade(
             ticket=ticket, pair=symbol_to_pair(symbol),
             direction=direction, entry_price=entry_price,
@@ -244,15 +274,18 @@ def symbol_to_pair(symbol):
     return symbol
 
 
-def register_be(ticket, symbol, entry_price, direction):
+def register_be(ticket, symbol, entry_price, direction, sl=0, tp=0):
     """Register a new position for BE tracking."""
     be_tracked[ticket] = {
         "symbol": symbol,
         "entry_price": entry_price,
         "direction": direction,
+        "sl": sl,
+        "tp": tp,
         "be_triggered": False,
     }
-    print(f"[BE] Tracking #{ticket} {symbol} {direction} entry={entry_price}")
+    database.save_be_state(be_tracked)
+    print(f"[BE] Tracking pos #{ticket} {symbol} {direction} entry={entry_price}")
 
 
 def _tg(msg):
@@ -434,10 +467,54 @@ def scan_all(is_manual=False):
                 continue
 
             order_id = result.get("order", "?")
-            register_be(order_id, symbol, entry, signal["direction"])
+
+            # Get the real position_id from MT5 (CRITICAL for P&L tracking)
+            # order_id != position_id in MT5 — never use order_id as position_id
+            position_id = None
+            open_pos = mt5.get_positions()
+            for p in open_pos:
+                if p["symbol"] == symbol and abs(p["price_open"] - entry) < entry * 0.005:
+                    position_id = p["ticket"]
+                    break
+            if position_id is None:
+                # Fallback: find by symbol + direction, most recent (highest ticket)
+                candidates = [p for p in open_pos if p["symbol"] == symbol]
+                if candidates:
+                    position_id = max(p["ticket"] for p in candidates)
+
+            if position_id is None:
+                print(f"  [WARN] Could not find position_id for {symbol}, using order_id")
+                position_id = order_id
+
+            register_be(position_id, symbol, entry, signal["direction"],
+                       sl=pos["sl_price"], tp=pos["tp_price"])
+
+            # Save signal + order to DB for history/stats
+            sid = database.save_signal({
+                "pair": pair_name,
+                "direction": signal["direction"],
+                "entry_price": entry,
+                "sl_price": pos["sl_price"],
+                "tp_price": pos["tp_price"],
+                "volume": pos["volume"],
+                "risk_pct": signal["risk_pct"],
+                "reason": signal.get("reason", ""),
+                "d1_fvg": 1 if signal.get("d1_fvg") else 0,
+                "h4_fvg": 1 if signal.get("h4_fvg") else 0,
+                "cot_text": signal.get("cot_text", ""),
+            })
+            database.save_order(sid, {
+                "pair": pair_name,
+                "direction": signal["direction"],
+                "entry_price": entry,
+                "sl_price": pos["sl_price"],
+                "tp_price": pos["tp_price"],
+                "volume": pos["volume"],
+            }, position_id)
+
             last_signal_sent[pair_name] = time.time()
 
-            print(f"  [AUTO] #{order_id} {pair_name} {signal['direction']} "
+            print(f"  [AUTO] #{order_id} (pos #{position_id}) {pair_name} {signal['direction']} "
                   f"Entry={entry:.5f} SL={pos['sl_price']} TP={pos['tp_price']} "
                   f"Lot={pos['volume']}")
 
@@ -469,14 +546,21 @@ if __name__ == "__main__":
 
     web_server.start_web()
 
+    def rapid_pnl_tracker():
+        """Every 15 sec: capture live P&L + detect closed positions."""
+        check_be()
+
     sched = BackgroundScheduler()
     sched.add_job(scan_all, CronTrigger(hour="*/3", minute=0),
                   id="scan")
     sched.add_job(check_be, "interval", seconds=config.TRIGGER_SCAN_SEC,
                   id="be_monitor")
+    sched.add_job(rapid_pnl_tracker, "interval", seconds=15,
+                  id="rapid_pnl")
     sched.start()
     print("[OK] Scan: at 0:00, 3:00, 6:00, 9:00, 12:00, 15:00, 18:00, 21:00")
     print(f"[OK] BE monitor: every {config.TRIGGER_SCAN_SEC}s")
+    print("[OK] Rapid P&L tracker: every 15s")
 
     # Telegram polling (daemon thread)
     from telegram_bot import start_polling

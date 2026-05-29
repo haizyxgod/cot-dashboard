@@ -34,7 +34,7 @@ SIGNAL_TIMEOUT = 300
 # --- Entry trigger (H1) ---
 H1_ATR_SURGE_MULT = 1.5   # H1 bar range > 1.5x avg range = volatility trigger
 TRIGGER_MAX_BARS = 24     # Max H1 bars to wait for trigger (24h)
-TRIGGER_SCAN_SEC = 900    # Re-check trigger every 15 min
+TRIGGER_SCAN_SEC = 300    # Re-check trigger every 5 min
 
 # --- Schedule ---
 SCAN_INTERVAL_MINUTES = 180  # Every 3 hours (COT+D1 check)

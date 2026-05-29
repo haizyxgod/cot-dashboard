@@ -44,6 +44,14 @@ def init():
         db.execute("ALTER TABLE orders ADD COLUMN result TEXT DEFAULT ''")
     except:
         pass
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS be_state (
+            ticket INTEGER PRIMARY KEY,
+            symbol TEXT, entry_price REAL, direction TEXT,
+            sl REAL, tp REAL, be_triggered INTEGER DEFAULT 0,
+            created_at TEXT
+        )
+    """)
     db.commit()
     db.close()
 
@@ -90,13 +98,23 @@ def get_order_history(limit=50):
 def save_closed_trade(ticket, pair, direction, entry_price, sl_price,
                       tp_price, volume, pnl, result, exit_price, open_time):
     db = get_db()
-    db.execute("""
-        INSERT OR REPLACE INTO orders
-        (order_id, time, pair, direction, entry_price, sl_price, tp_price,
-         volume, pnl, result)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (ticket, open_time, pair, direction, entry_price, sl_price, tp_price,
-          volume, round(pnl, 2), result))
+    # Update existing row from save_order() if present; INSERT only if missing
+    cur = db.execute("SELECT id FROM orders WHERE order_id=?", (ticket,)).fetchone()
+    if cur:
+        db.execute("""
+            UPDATE orders SET time=?, pair=?, direction=?,
+            entry_price=?, sl_price=?, tp_price=?,
+            volume=?, pnl=?, result=?
+            WHERE order_id=?
+        """, (open_time, pair, direction, entry_price, sl_price, tp_price,
+              volume, round(pnl, 2), result, ticket))
+    else:
+        db.execute("""
+            INSERT INTO orders (order_id, time, pair, direction, entry_price,
+            sl_price, tp_price, volume, pnl, result)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (ticket, open_time, pair, direction, entry_price, sl_price, tp_price,
+              volume, round(pnl, 2), result))
     db.commit()
     db.close()
     return True
@@ -107,3 +125,35 @@ def get_signal_history(limit=50):
     rows = db.execute("SELECT * FROM signals ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+
+def save_be_state(be_tracked_dict):
+    db = get_db()
+    for ticket, info in be_tracked_dict.items():
+        db.execute("""
+            INSERT OR REPLACE INTO be_state
+            (ticket, symbol, entry_price, direction, sl, tp, be_triggered, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (ticket, info.get("symbol"), info.get("entry_price"),
+              info.get("direction"), info.get("sl", 0), info.get("tp", 0),
+              1 if info.get("be_triggered") else 0, str(datetime.now())))
+    db.commit()
+    db.close()
+
+
+def load_be_state():
+    db = get_db()
+    rows = db.execute("SELECT * FROM be_state").fetchall()
+    db.close()
+    return {int(r["ticket"]): {
+        "symbol": r["symbol"], "entry_price": r["entry_price"],
+        "direction": r["direction"], "sl": r["sl"], "tp": r["tp"],
+        "be_triggered": bool(r["be_triggered"])
+    } for r in rows}
+
+
+def clear_be_ticket(ticket):
+    db = get_db()
+    db.execute("DELETE FROM be_state WHERE ticket=?", (ticket,))
+    db.commit()
+    db.close()
