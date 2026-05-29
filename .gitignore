@@ -7,3 +7,23 @@ cot_data.json
 cot_dashboard/cot_data.json
 trading_bot/.env
 *.pyc
+
+# Trading bot — test scripts and runtime data
+trading_bot/_test_*.py
+trading_bot/_debug_*.py
+trading_bot/_close_*.py
+trading_bot/check_symbols.py
+trading_bot/debug_eur.py
+trading_bot/quick_test.py
+trading_bot/run_polling.py
+trading_bot/send_and_poll.py
+trading_bot/test_scan.py
+trading_bot/merge_cot.py
+trading_bot/download_cot_history.py
+trading_bot/bot_history.db
+trading_bot/backtest_results.csv
+trading_bot/cot_history.json
+trading_bot/poll_err.txt
+trading_bot/poll_out.txt
+trading_bot/start_bot.vbs
+COPIES/
