@@ -149,6 +149,9 @@ HTML = r"""<!DOCTYPE html>
     <div class="card"><div class="label">Лучшая / Худшая</div><div class="value" style="font-size:0.9rem"><span id="best-trade" style="color:#00e676">--</span> / <span id="worst-trade" style="color:#ff5252">--</span></div><div class="sub">сделка</div></div>
 </div>
 
+<div class="section-title">Equity Curve <span style="font-weight:400;color:var(--muted);font-size:0.7rem" id="eq-stats"></span></div>
+<canvas id="equity-chart" height="220" style="width:100%;background:var(--bg2);border-radius:10px;border:1px solid var(--border);margin-bottom:16px"></canvas>
+
 <div class="section-title">P&amp;L по месяцам</div>
 <div style="overflow-x:auto">
 <table class="monthly-table" id="monthly-table"><tbody><tr><td colspan="13">Загрузка...</td></tr></tbody></table>
@@ -404,11 +407,12 @@ function buildMonthlyTable(months){
 async function refresh(){
     refreshCount++;
     document.getElementById('refresh-counter').textContent='обновление #'+refreshCount;
-    var p=null,s=null,l=null,pr=null;
+    var p=null,s=null,l=null,pr=null,eq=null;
     try{p=await fetch('/api/positions').then(r=>r.json())}catch(e){}
     try{s=await fetch('/api/stats').then(r=>r.json())}catch(e){}
     try{l=await fetch('/api/log?n=10').then(r=>r.json())}catch(e){}
     try{pr=await fetch('/api/prices').then(r=>r.json())}catch(e){}
+    try{eq=await fetch('/api/equity').then(r=>r.json())}catch(e){}
     if(!s)return;
 
     if(pr && !pr.error){
@@ -506,7 +510,92 @@ async function refresh(){
         });
         lh.innerHTML=lhtml;
     }
+    // Equity chart
+    if(eq && eq.points && eq.points.length>0) drawEquityChart(eq);
 }
+
+function drawEquityChart(data){
+    var canvas=document.getElementById('equity-chart');
+    if(!canvas)return;
+    var ctx=canvas.getContext('2d');
+    var W=canvas.parentElement.clientWidth-24;
+    canvas.width=W;
+    var H=220;
+    var pad={top:20,right:16,bottom:30,left:60};
+    var pw=W-pad.left-pad.right;
+    var ph=H-pad.top-pad.bottom;
+    ctx.clearRect(0,0,W,H);
+
+    var pts=data.points;
+    var vals=pts.map(function(p){return p.e;});
+    var minVal=Math.min.apply(null,vals);
+    var maxVal=Math.max.apply(null,vals);
+    var range=maxVal-minVal||1;
+    var initBal=data.initial_balance;
+
+    // Extend range to include initial balance reference line
+    minVal=Math.min(minVal,initBal);
+    maxVal=Math.max(maxVal,initBal);
+    range=maxVal-minVal||1;
+
+    function x(i){return pad.left+(i/(pts.length-1))*pw;}
+    function y(v){return pad.top+ph-((v-minVal)/range)*ph;}
+
+    // Grid lines
+    ctx.strokeStyle='#21262d';ctx.lineWidth=1;
+    var gridLines=5;
+    for(var i=0;i<=gridLines;i++){
+        var gy=pad.top+(ph/gridLines)*i;
+        ctx.beginPath();ctx.moveTo(pad.left,gy);ctx.lineTo(W-pad.right,gy);ctx.stroke();
+        var gv=minVal+(range/gridLines)*(gridLines-i);
+        ctx.fillStyle='#8b949e';ctx.font='9px system-ui';ctx.textAlign='right';
+        ctx.fillText('$'+gv.toFixed(0),pad.left-6,gy+3);
+    }
+
+    // Time labels (first, last, and a few midpoints)
+    ctx.textAlign='center';ctx.fillStyle='#8b949e';ctx.font='8px system-ui';
+    var labels=[0,Math.floor((pts.length-1)/2),pts.length-1];
+    labels.forEach(function(i){
+        ctx.fillText(pts[i].t.slice(5),x(i),H-pad.bottom+14);
+    });
+
+    // Initial balance dashed line
+    var iy=y(initBal);
+    ctx.strokeStyle='#484f58';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(pad.left,iy);ctx.lineTo(W-pad.right,iy);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#8b949e';ctx.textAlign='left';ctx.font='9px system-ui';
+    ctx.fillText('Initial $'+initBal.toFixed(0),pad.left+4,iy-4);
+
+    // Draw equity line
+    var above=initBal;
+    ctx.beginPath();
+    ctx.moveTo(x(0),y(pts[0].e));
+    for(var i=1;i<pts.length;i++)ctx.lineTo(x(i),y(pts[i].e));
+    ctx.strokeStyle='#00e676';ctx.lineWidth=2;ctx.stroke();
+
+    // Fill area
+    ctx.lineTo(x(pts.length-1),y(initBal));
+    ctx.lineTo(x(0),y(initBal));
+    ctx.closePath();
+    var lastVal=pts[pts.length-1].e;
+    var grd=ctx.createLinearGradient(0,pad.top,0,H-pad.bottom);
+    if(lastVal>=initBal){
+        grd.addColorStop(0,'rgba(0,230,118,0.2)');grd.addColorStop(1,'rgba(0,230,118,0.02)');
+    }else{
+        grd.addColorStop(0,'rgba(255,82,82,0.2)');grd.addColorStop(1,'rgba(255,82,82,0.02)');
+    }
+    ctx.fillStyle=grd;ctx.fill();
+
+    // Stats text
+    var sign=data.total_return>=0?'+':'';
+    var color=data.total_return>=0?'#00e676':'#ff5252';
+    document.getElementById('eq-stats').innerHTML=
+        'Initial: <b>$'+data.initial_balance.toFixed(0)+'</b> | '+
+        'Current: <b style=\"color:'+color+'\">$'+data.current_equity.toFixed(0)+' ('+sign+data.total_return_pct+'%)</b> | '+
+        'Max DD: <b style=\"color:#ff5252\">'+data.max_drawdown_pct+'%</b>';
+}
+
 if(isDashboard){ refresh(); setInterval(refresh,10000); }
 </script>
 </body>
@@ -641,6 +730,69 @@ def api_prices():
             prices[pair_name] = {"bid": tick["bid"], "ask": tick["ask"]}
         mt5.disconnect()
         return jsonify(prices)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/api/equity")
+def api_equity():
+    """Return equity curve reconstructed from trade history.
+    Initial balance = current MT5 balance - total closed P&L (no config needed)."""
+    try:
+        orders = database.get_order_history(5000)
+        closed = [o for o in orders if o.get("result") in ("win", "loss", "be") and o.get("pnl")]
+        closed.sort(key=lambda o: o.get("time", ""))
+        total_closed_pnl = sum(o.get("pnl", 0) for o in closed)
+
+        # Initial balance = current MT5 balance - total closed P&L
+        from mt5_client import client as mt5
+        mt5.connect()
+        acc = mt5.get_account_summary()
+        current_balance = float(acc.get("balance", 0))
+        positions = mt5.get_positions()
+        open_pnl = sum(p.get("profit", 0) for p in positions)
+        mt5.disconnect()
+
+        initial = current_balance - total_closed_pnl
+        if initial <= 0:
+            initial = current_balance or 10000
+
+        pts = []
+        cum = initial
+        peak = initial
+        max_dd_pct = 0.0
+
+        if closed:
+            pts.append({"t": closed[0].get("time", "")[:10], "e": round(initial, 2)})
+        else:
+            pts.append({"t": datetime.now().strftime("%Y-%m-%d"), "e": round(initial, 2)})
+
+        for o in closed:
+            pnl = o.get("pnl", 0)
+            cum += pnl
+            t = (o.get("time", "") or "")[:10]
+            pts.append({"t": t, "e": round(cum, 2)})
+            if cum > peak:
+                peak = cum
+            dd = (peak - cum) / peak * 100 if peak > 0 else 0
+            if dd > max_dd_pct:
+                max_dd_pct = dd
+
+        current_equity = current_balance + open_pnl
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        pts.append({"t": today_str, "e": round(current_equity, 2)})
+
+        total_return = current_equity - initial
+        total_return_pct = round(total_return / initial * 100, 2) if initial > 0 else 0
+
+        return jsonify({
+            "points": pts,
+            "initial_balance": round(initial, 2),
+            "current_equity": round(current_equity, 2),
+            "total_return": round(total_return, 2),
+            "total_return_pct": total_return_pct,
+            "max_drawdown_pct": round(max_dd_pct, 2),
+        })
     except Exception as e:
         return jsonify({"error": str(e)})
 

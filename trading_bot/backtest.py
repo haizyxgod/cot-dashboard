@@ -327,7 +327,7 @@ def _make_trade(ap, exit_time, pair_name, result, exit_price, pnl, balance, bar_
 
 def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
                   start_date=None, end_date=None, verbose=True):
-    is_forex = pair_name in ("EUR/USD", "GBP/USD", "USD/JPY")
+    is_forex = pair_name in ("GBP/USD", "USD/JPY")
     rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
 
     if verbose:
@@ -347,8 +347,8 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
         print(f"  [SKIP] No data for {symbol}")
         return [], {}, start_balance
 
-    pt = info["point"] if info else (0.00001 if "EUR" in symbol or "GBP" in symbol else 0.01)
-    cs = info["trade_contract_size"] if info else (100000 if "EUR" in symbol or "GBP" in symbol else 100)
+    pt = info["point"] if info else (0.00001 if "GBP" in symbol else 0.01)
+    cs = info["trade_contract_size"] if info else (100000 if "GBP" in symbol else 100)
     tv = info["trade_tick_value"] if info else 0
 
     all_d1 = all_d1.sort_values("time").reset_index(drop=True)
@@ -505,7 +505,7 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
         default_rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
 
         if is_forex:
-            trend_thresh, range_thresh = 20, 15  # EUR: lower ADX thresholds
+            trend_thresh, range_thresh = 20, 15  # Forex: lower ADX thresholds
         else:
             trend_thresh, range_thresh = 25, 20  # Gold
 
@@ -652,7 +652,7 @@ def backtest_pair(symbol, pair_name, start_balance=10000, cot_signals=None,
 def backtest_pair_h1(symbol, pair_name, start_balance=10000, cot_signals=None,
                      start_date=None, end_date=None, verbose=True):
     """H1 version — same strategy, faster timeframe."""
-    is_forex = pair_name in ("EUR/USD", "GBP/USD", "USD/JPY")
+    is_forex = pair_name in ("GBP/USD", "USD/JPY")
     rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
     cooldown_bars = 24  # 24h on H1
 

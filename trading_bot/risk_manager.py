@@ -49,4 +49,4 @@ def calculate_lot(balance, entry_price, sl_price, risk_pct, pair,
 
 
 def _is_forex(pair):
-    return pair in ("EUR/USD", "GBP/USD", "USD/JPY")
+    return pair in ("USD/JPY", "GBP/USD")

@@ -1,24 +1,21 @@
-"""COT + FVG Trading Bot v5 — ADX Adaptive TP + H1 Trigger.
+"""COT + FVG Trading Bot v4 — AUTO EXECUTION.
 
 Цепочка:
   1. FVG(D1+H4) задаёт направление
   2. Trend (EMA50/200 Gold, EMA10/30 Forex) валидирует
   3. COT (CFTC report) фильтрует: блокирует против, усиливает совпадение
-  4. ADX: market regime -> adaptive TP (TREND=ATR, RANGE=1:1, NEUTRAL=default)
-  5. H1 trigger: fractal breakout or volatility surge confirmation
-  6. SL: H4 Fractal + ATR
-  7. AUTO EXECUTE -> Telegram notification
-  8. BE monitor: fractal breakout -> SL to entry
-  9. Pyramiding: new entry when all positions at BE
+  4. ADX: market regime → adaptive TP (TREND=ATR, RANGE=1:1, NEUTRAL=default)
+  5. SL: H4 Fractal + ATR
+  6. AUTO EXECUTE → Telegram notification
+  7. BE monitor: fractal breakout → SL to entry
+  8. Pyramiding: new entry when all positions at BE
 """
 
 import sys
 import os
 import time
 import threading
-import numpy as np
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "cot_dashboard"))
 
@@ -31,7 +28,6 @@ from fractal_detector import nearest_fractal, calculate_atr, find_fractals
 from signal_engine import evaluate_setup
 from risk_manager import calculate_lot
 from trend_filter import check_daily_trend
-from entry_trigger import check_h1_trigger
 import web_server
 from web_server import add_log, bot_state
 import config
@@ -54,7 +50,8 @@ except ImportError:
 def get_cot_verdict(pair_name):
     if not COT_AVAILABLE:
         return {"signal": "N/A", "score": 0, "direction": "neutral", "text": "COT недоступен"}
-    mapping = {"XAU/USD": "XAU (Золото)", "USD/JPY": "USD/JPY"}
+    mapping = {"XAU/USD": "XAU (Золото)", "EUR/USD": "EUR/USD",
+               "GBP/USD": "GBP/USD", "USD/JPY": "USD/JPY"}
     cot_key = mapping.get(pair_name)
     if not cot_key:
         return {"signal": "N/A", "score": 0, "direction": "neutral", "text": "Нет данных"}
@@ -93,75 +90,6 @@ last_signal_sent = {}
 
 # BE tracking: ticket -> {entry_price, symbol, direction, be_triggered}
 be_tracked = {}
-
-# Pending signals waiting for H1 trigger
-# Each: {pair_name, symbol, direction, entry_h4, sl, tp_price, risk_pct,
-#         score, reason, sl_price, volume, rr, regime, signal_time, expires_at}
-pending_signals = []
-_pending_lock = threading.Lock()
-
-
-def _persist_pending():
-    """Save pending signals to SQLite so they survive restarts."""
-    import json
-    serializable = []
-    for ps in pending_signals:
-        s = dict(ps)
-        s["signal_time"] = s["signal_time"].isoformat()
-        s["expires_at"] = s["expires_at"].isoformat()
-        serializable.append(s)
-    database.save_kv("pending_signals", json.dumps(serializable))
-
-
-def _restore_pending():
-    """Restore pending signals from SQLite after restart."""
-    import json
-    raw = database.load_kv("pending_signals")
-    if not raw:
-        return []
-    try:
-        data = json.loads(raw)
-        restored = []
-        now = datetime.now()
-        for s in data:
-            s["signal_time"] = datetime.fromisoformat(s["signal_time"])
-            s["expires_at"] = datetime.fromisoformat(s["expires_at"])
-            if now < s["expires_at"]:
-                restored.append(s)
-            else:
-                print(f"  [PENDING] Expired on restore: {s['pair_name']} {s['direction']}")
-        return restored
-    except Exception as e:
-        print(f"  [PENDING] Restore error: {e}")
-        return []
-
-
-def _calc_adx(df, period=14):
-    """Calculate ADX(14) - trend strength indicator."""
-    if len(df) < period + 1:
-        return None
-    high = df["high"].values
-    low = df["low"].values
-    close = df["close"].values
-
-    tr = np.zeros(len(high))
-    plus_dm = np.zeros(len(high))
-    minus_dm = np.zeros(len(high))
-
-    for i in range(1, len(high)):
-        tr[i] = max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
-        up = high[i] - high[i-1]
-        down = low[i-1] - low[i]
-        plus_dm[i] = up if up > down and up > 0 else 0
-        minus_dm[i] = down if down > up and down > 0 else 0
-
-    atr = pd.Series(tr).ewm(alpha=1/period, adjust=False).mean().values
-    plus_di = 100 * pd.Series(plus_dm).ewm(alpha=1/period, adjust=False).mean().values / atr
-    minus_di = 100 * pd.Series(minus_dm).ewm(alpha=1/period, adjust=False).mean().values / atr
-    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 0.0001)
-    adx = pd.Series(dx).ewm(alpha=1/period, adjust=False).mean().values
-
-    return float(adx[-1])
 
 
 def init_be_tracking():
@@ -525,86 +453,81 @@ def scan_all(is_manual=False):
                 web_server.add_log(msg)
                 continue
 
-            # --- ADX Market Regime + Adaptive TP ---
-            d1_for_adx = df_d1_trend.tail(250)
-            adx = _calc_adx(d1_for_adx, 14)
-            is_forex = "JPY" in pair_name or "GBP" in pair_name
+            # --- AUTO EXECUTE ---
+            result = mt5.place_market_order(
+                symbol, signal["direction"],
+                float(pos["sl_price"]), float(pos["tp_price"]),
+                float(pos["volume"])
+            )
 
-            if is_forex:
-                trend_thresh, range_thresh = 20, 15
-            else:
-                trend_thresh, range_thresh = 25, 20
+            if result is None:
+                print(f"  [AUTO] ORDER FAILED: {pair_name} {signal['direction']}")
+                _notify_error(pair_name, signal["direction"],
+                              f"MT5 rejected order")
+                continue
 
-            if adx is None:
-                regime = "neutral"
-            elif adx > trend_thresh:
-                regime = "trend"
-            elif adx < range_thresh:
-                regime = "range"
-            else:
-                regime = "neutral"
+            order_id = result.get("order", "?")
 
-            if regime == "trend":
-                tp_mult = config.TP_ATR_MULT_FOREX if is_forex else config.TP_ATR_MULT
-                if atr_val and atr_val > 0:
-                    if signal["direction"] == "BUY":
-                        tp_price = entry + atr_val * tp_mult
-                    else:
-                        tp_price = entry - atr_val * tp_mult
-                else:
-                    tp_price = pos["tp_price"]
-                tp_label = f"ATR({atr_val:.4f}x{tp_mult})"
-            elif regime == "range":
-                sl_dist = abs(entry - sl)
-                if signal["direction"] == "BUY":
-                    tp_price = entry + sl_dist * 1.0
-                else:
-                    tp_price = entry - sl_dist * 1.0
-                tp_label = "1:1"
-            else:
-                tp_price = pos["tp_price"]
-                tp_label = f"RR({pos['rr']})"
+            # Get the real position_id from MT5 (CRITICAL for P&L tracking)
+            # order_id != position_id in MT5 — never use order_id as position_id
+            position_id = None
+            open_pos = mt5.get_positions()
+            for p in open_pos:
+                if p["symbol"] == symbol and abs(p["price_open"] - entry) < entry * 0.005:
+                    position_id = p["ticket"]
+                    break
+            if position_id is None:
+                # Fallback: find by symbol + direction, most recent (highest ticket)
+                candidates = [p for p in open_pos if p["symbol"] == symbol]
+                if candidates:
+                    position_id = max(p["ticket"] for p in candidates)
 
-            print(f"  ADX={adx:.1f if adx else '?'} regime={regime} TP={tp_label} "
-                  f"SL={sl:.5f} TP_price={tp_price:.5f}")
+            if position_id is None:
+                print(f"  [WARN] Could not find position_id for {symbol}, using order_id")
+                position_id = order_id
 
-            # Round TP to symbol precision
-            tp_price = round(tp_price, 5 if "JPY" in symbol else 2)
+            register_be(position_id, symbol, entry, signal["direction"],
+                       sl=pos["sl_price"], tp=pos["tp_price"])
 
-            # --- Queue as pending: wait for H1 trigger ---
-            expires_at = datetime.now() + timedelta(hours=config.TRIGGER_MAX_BARS)
-            with _pending_lock:
-                pending_signals.append({
-                    "pair_name": pair_name,
-                    "symbol": symbol,
-                    "direction": signal["direction"],
-                    "entry_h4": entry,
-                    "sl": sl,
-                    "tp_price": tp_price,
-                    "risk_pct": signal["risk_pct"],
-                    "score": signal.get("score", 0),
-                    "reason": signal["reason"],
-                    "sl_price": pos["sl_price"],
-                    "volume": pos["volume"],
-                    "rr": pos.get("rr", 0),
-                    "regime": regime,
-                    "signal_time": datetime.now(),
-                    "expires_at": expires_at,
-                })
-                _persist_pending()
+            # Save signal + order to DB for history/stats
+            sid = database.save_signal({
+                "pair": pair_name,
+                "direction": signal["direction"],
+                "entry_price": entry,
+                "sl_price": pos["sl_price"],
+                "tp_price": pos["tp_price"],
+                "volume": pos["volume"],
+                "risk_pct": signal["risk_pct"],
+                "reason": signal.get("reason", ""),
+                "d1_fvg": 1 if signal.get("d1_fvg") else 0,
+                "h4_fvg": 1 if signal.get("h4_fvg") else 0,
+                "cot_text": signal.get("cot_text", ""),
+            })
+            database.save_order(sid, {
+                "pair": pair_name,
+                "direction": signal["direction"],
+                "entry_price": entry,
+                "sl_price": pos["sl_price"],
+                "tp_price": pos["tp_price"],
+                "volume": pos["volume"],
+            }, position_id)
 
             last_signal_sent[pair_name] = time.time()
 
-            print(f"  [PENDING] {pair_name} {signal['direction']} "
-                  f"Entry~{entry:.5f} SL={pos['sl_price']} TP={tp_price:.5f} "
-                  f"Lot={pos['volume']} Regime={regime} "
-                  f"Waiting H1 trigger (expires {expires_at.strftime('%H:%M')})")
+            print(f"  [AUTO] #{order_id} (pos #{position_id}) {pair_name} {signal['direction']} "
+                  f"Entry={entry:.5f} SL={pos['sl_price']} TP={pos['tp_price']} "
+                  f"Lot={pos['volume']}")
 
             web_server.add_log(
                 f"<span class='hl'>{pair_name} {signal['direction']}</span> "
-                f"PENDING Entry~{entry:.5f} Lot={pos['volume']} "
-                f"Risk={signal['risk_pct']}% Score={signal.get('score',0)}/4 "
-                f"Regime={regime} | Waiting H1 trigger")
+                f"#{order_id} Entry={entry:.5f} Lot={pos['volume']} "
+                f"Risk={signal['risk_pct']}% Score={signal.get('score',0)}/4")
+
+            # Telegram notification
+            _notify_trade(pair_name, signal["direction"], entry,
+                          pos["sl_price"], pos["tp_price"],
+                          pos["volume"], signal["risk_pct"],
+                          signal["reason"], order_id)
 
         except Exception as e:
             print(f"  [ERR] {pair_name}: {e}")
@@ -613,234 +536,9 @@ def scan_all(is_manual=False):
     print(f"[{datetime.now()}] === END ===\n")
 
 
-def check_pending_triggers():
-    """Check pending signals for H1 trigger confirmation.
-    Runs every 5 minutes. Enters trade when H1 fractal/volatility triggers,
-    expires signals older than TRIGGER_MAX_BARS hours."""
-    global pending_signals
-
-    with _pending_lock:
-        if not pending_signals:
-            return
-
-    if not mt5.connect():
-        return
-
-    try:
-        still_pending = []
-        now = datetime.now()
-
-        with _pending_lock:
-            signals = list(pending_signals)
-
-        for ps in signals:
-            # Check expiry
-            if now > ps["expires_at"]:
-                print(f"  [PENDING] EXPIRED: {ps['pair_name']} {ps['direction']} "
-                      f"(signal at {ps['signal_time'].strftime('%H:%M')})")
-                web_server.add_log(
-                    f"<span class='hl'>{ps['pair_name']} {ps['direction']}</span> "
-                    f"H1 trigger EXPIRED (no confirmation in 24h)")
-                continue
-
-            symbol = ps["symbol"]
-            pair_name = ps["pair_name"]
-            direction = ps["direction"]
-
-            # Fetch H1 + H4 data for trigger check
-            try:
-                df_h1 = mt5.get_candles(symbol, "H1", 30)
-                df_h4 = mt5.get_candles(symbol, "H4", 50)
-            except Exception:
-                still_pending.append(ps)
-                continue
-
-            if df_h1.empty or df_h4.empty:
-                still_pending.append(ps)
-                continue
-
-            trigger = check_h1_trigger(df_h1, df_h4.tail(5), direction)
-
-            if not trigger["triggered"]:
-                still_pending.append(ps)
-                continue
-
-            # --- TRIGGERED! Execute trade ---
-            tick = mt5.get_current_price(symbol)
-            entry = tick["bid"] if direction == "SELL" else tick["ask"]
-
-            acc = mt5.get_account_summary()
-            info = mt5.get_symbol_info(symbol)
-            if info is None:
-                still_pending.append(ps)
-                continue
-
-            balance = float(acc.get("balance", 0))
-
-            # Recalculate SL from ACTUAL entry price (not H4 signal price)
-            atr_val = calculate_atr(df_h4, 14)
-            sl = nearest_fractal(df_h4, direction.lower(), entry, atr_value=atr_val)
-            if sl is None:
-                print(f"  [PENDING] No fractal SL at trigger time for {pair_name}")
-                still_pending.append(ps)
-                continue
-
-            # Recalculate TP from ACTUAL entry + SL with stored regime
-            is_forex = "JPY" in pair_name or "GBP" in pair_name
-            rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
-            pos = calculate_lot(
-                balance, entry, sl, ps["risk_pct"],
-                pair_name, info["point"], info["trade_contract_size"],
-                info["trade_tick_value"], rr=rr
-            )
-            if pos.get("error"):
-                print(f"  [PENDING] Lot recalc error: {pos['error']}")
-                still_pending.append(ps)
-                continue
-
-            # Recalculate TP based on regime (same logic as scan_all)
-            regime = ps["regime"]
-            if regime == "trend":
-                tp_mult = config.TP_ATR_MULT_FOREX if is_forex else config.TP_ATR_MULT
-                if atr_val and atr_val > 0:
-                    if direction == "BUY":
-                        tp_price = entry + atr_val * tp_mult
-                    else:
-                        tp_price = entry - atr_val * tp_mult
-                else:
-                    tp_price = pos["tp_price"]
-            elif regime == "range":
-                sl_dist = abs(entry - sl)
-                if direction == "BUY":
-                    tp_price = entry + sl_dist * 1.0
-                else:
-                    tp_price = entry - sl_dist * 1.0
-            else:
-                tp_price = pos["tp_price"]
-
-            tp_price = round(tp_price, 5 if "JPY" in symbol else 2)
-
-            result = mt5.place_market_order(
-                symbol, direction,
-                float(pos["sl_price"]), float(tp_price),
-                float(pos["volume"])
-            )
-
-            if result is None:
-                print(f"  [PENDING] ORDER FAILED: {pair_name} {direction}")
-                still_pending.append(ps)
-                continue
-
-            order_id = result.get("order", "?")
-
-            # Find position_id
-            position_id = None
-            open_pos = mt5.get_positions()
-            for p in open_pos:
-                if p["symbol"] == symbol and abs(p["price_open"] - entry) < entry * 0.005:
-                    position_id = p["ticket"]
-                    break
-            if position_id is None:
-                candidates = [p for p in open_pos if p["symbol"] == symbol]
-                if candidates:
-                    position_id = max(p["ticket"] for p in candidates)
-            if position_id is None:
-                position_id = order_id
-
-            register_be(position_id, symbol, entry, direction,
-                       sl=pos["sl_price"], tp=tp_price)
-
-            sid = database.save_signal({
-                "pair": pair_name,
-                "direction": direction,
-                "entry_price": entry,
-                "sl_price": pos["sl_price"],
-                "tp_price": tp_price,
-                "volume": pos["volume"],
-                "risk_pct": ps["risk_pct"],
-                "reason": ps["reason"] + f" | H1 {trigger['trigger_type']}",
-                "d1_fvg": 1,
-                "h4_fvg": 1,
-                "cot_text": "",
-            })
-            database.save_order(sid, {
-                "pair": pair_name,
-                "direction": direction,
-                "entry_price": entry,
-                "sl_price": pos["sl_price"],
-                "tp_price": tp_price,
-                "volume": pos["volume"],
-            }, position_id)
-
-            print(f"  [PENDING] TRIGGERED #{order_id} (pos #{position_id}) "
-                  f"{pair_name} {direction} Entry={entry:.5f} "
-                  f"SL={pos['sl_price']} TP={tp_price} Lot={pos['volume']} "
-                  f"Trigger={trigger['trigger_type']} Regime={regime}")
-
-            web_server.add_log(
-                f"<span class='hl'>{pair_name} {direction}</span> "
-                f"#{order_id} H1 TRIGGER ({trigger['trigger_type']}) "
-                f"Entry={entry:.5f} Lot={pos['volume']} "
-                f"Risk={ps['risk_pct']}% Score={ps['score']}/4 "
-                f"Regime={regime}")
-
-            _notify_trade(pair_name, direction, entry,
-                         pos["sl_price"], tp_price,
-                         pos["volume"], ps["risk_pct"],
-                         ps["reason"] + f" | H1 {trigger['trigger_type']}",
-                         order_id)
-
-        with _pending_lock:
-            pending_signals = still_pending
-            _persist_pending()
-
-    except Exception as e:
-        print(f"  [PENDING] Error: {e}")
-        import traceback; traceback.print_exc()
-    finally:
-        mt5.disconnect()
-
-
-def _send_healthcheck():
-    """Periodic status update to Telegram."""
-    try:
-        mt5.connect()
-        acc = mt5.get_account_summary()
-        positions = mt5.get_positions()
-        mt5.disconnect()
-
-        balance = acc.get("balance", 0)
-        equity = acc.get("equity", 0)
-        open_count = len(positions)
-        open_pnl = sum(p.get("profit", 0) for p in positions)
-
-        orders = database.get_order_history(5000)
-        closed = [o for o in orders if o.get("result") in ("win", "loss", "be")]
-        today = datetime.now().strftime("%Y-%m-%d")
-        daily_pnl = sum(o.get("pnl", 0) for o in closed if (o.get("time") or "").startswith(today))
-        wins = sum(1 for o in closed if o.get("result") == "win")
-        losses = sum(1 for o in closed if o.get("result") == "loss")
-        wr = wins / (wins + losses) * 100 if (wins + losses) > 0 else 0
-
-        with _pending_lock:
-            pending_n = len(pending_signals)
-        mt5_icon = "✅" if bot_state.get("mt5_connected") else "❌"
-        pending_line = f"Ожидают H1: *{pending_n}* сигн.\n" if pending_n else ""
-        _tg(
-            f"🤖 *Бот жив* | {datetime.now().strftime('%H:%M')}\n"
-            f"Баланс: *${balance:,.0f}* | Equity: *${equity:,.0f}*\n"
-            f"Открыто: *{open_count}* поз. | P&L: *${open_pnl:+,.0f}*\n"
-            f"{pending_line}"
-            f"Сегодня: *${daily_pnl:+,.0f}* | Win Rate: *{wr:.1f}%*\n"
-            f"MT5: {mt5_icon} | Сделок: {len(closed)}"
-        )
-    except Exception as e:
-        _tg(f"⚠️ *Healthcheck error:* {e}")
-
-
 if __name__ == "__main__":
     print("=" * 50)
-    print("COT + FVG Bot v5 — ADX Adaptive TP + H1 Trigger")
+    print("COT + FVG Bot v4 — AUTO MODE")
     print(f"Server: {config.MT5_SERVER}")
     print(f"Pairs: {list(config.PAIRS.keys())}")
     print(f"UI: http://localhost:5002/bot (monitoring)")
@@ -857,44 +555,28 @@ if __name__ == "__main__":
                   id="scan")
     sched.add_job(check_be, "interval", seconds=config.TRIGGER_SCAN_SEC,
                   id="be_monitor")
-    sched.add_job(check_pending_triggers, "interval", seconds=config.TRIGGER_SCAN_SEC,
-                  id="h1_trigger_monitor")
     sched.add_job(rapid_pnl_tracker, "interval", seconds=15,
                   id="rapid_pnl")
-    # Healthcheck at 9:00, 15:00, 21:00
-    sched.add_job(_send_healthcheck, CronTrigger(hour="9,15,21", minute=17),
-                  id="healthcheck")
     sched.start()
     print("[OK] Scan: at 0:00, 3:00, 6:00, 9:00, 12:00, 15:00, 18:00, 21:00")
     print(f"[OK] BE monitor: every {config.TRIGGER_SCAN_SEC}s")
-    print("[OK] H1 trigger monitor: every 5min")
     print("[OK] Rapid P&L tracker: every 15s")
-    print("[OK] Healthcheck: at 9:17, 15:17, 21:17")
 
     # Telegram polling (daemon thread)
     from telegram_bot import start_polling
     threading.Thread(target=start_polling, daemon=True, name="tg-polling").start()
     print("[OK] Telegram polling started")
 
-    # Send startup message (non-blocking — Telegram may not be ready yet)
-    def _send_startup_msg():
-        try:
-            from telegram_bot import send_text
-            send_text("🤖 *Бот запущен* (v5.1) — клавиатура активна.")
-        except Exception as e:
-            print(f"[TG] Startup message failed: {e}")
-    threading.Thread(target=_send_startup_msg, daemon=True).start()
+    # Send startup message with keyboard
+    sys.stdout.flush()
+    try:
+        from telegram_bot import send_text
+        send_text("🤖 *Бот запущен* — клавиатура активна.")
+    except Exception as e:
+        print(f"[TG] Startup message failed: {e}")
 
     print("\n[Init] Restoring BE state...")
     init_be_tracking()
-
-    print("\n[Init] Restoring pending signals...")
-    restored = _restore_pending()
-    if restored:
-        pending_signals = restored
-        print(f"  Restored {len(restored)} pending signal(s)")
-    else:
-        print("  No pending signals to restore")
 
     print("\n[Init] First scan...")
     scan_all()

@@ -1,7 +1,7 @@
 """Daily trend filter — pair-specific EMA periods.
 
 Gold:   EMA(50) vs EMA(200) — долгосрочный тренд
-EUR:    EMA(10) vs EMA(30)  — краткосрочный тренд (~2 нед / ~6 нед)
+Forex: EMA(10) vs EMA(30)  — краткосрочный тренд (~2 нед / ~6 нед)
 """
 
 
@@ -9,10 +9,10 @@ def check_daily_trend(df_d1, pair_name=None):
     """
     Определяет направление тренда по EMA.
 
-    pair_name: 'XAU/USD', 'EUR/USD', etc.
+    pair_name: 'XAU/USD', 'USD/JPY', etc.
     Returns: 'bullish' | 'bearish' | 'neutral'
     """
-    if pair_name and ("EUR" in pair_name or "JPY" in pair_name):
+    if pair_name and "JPY" in pair_name:
         fast, slow = 10, 30
         threshold = 0.3  # tighter for shorter EMAs
     else:

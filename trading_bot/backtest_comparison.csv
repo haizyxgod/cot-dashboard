@@ -1,0 +1,5 @@
+Strategy,Trades,Wins,Losses,BE,Win Rate %,Total PnL,Profit Factor
+Fractal BE (original),1587,293,111,1178,72.5,+26861.98,2.50
+BE at 1R,650,306,240,88,56.0,-3022.43,0.91
+Night only (< 11h),403,68,23,310,74.7,+6268.18,2.90
+Day only (>= 11h),396,63,22,311,74.1,+6657.44,3.45

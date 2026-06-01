@@ -63,7 +63,7 @@ class MT5Client:
     # --- Candles ---
 
     def get_candles(self, symbol, timeframe, count=50):
-        """symbol: 'XAUUSD', 'EURUSD', 'GBPUSD'
+        """symbol: 'XAUUSD', 'USDJPY'
            timeframe: 'D', 'H4', 'H1' → mt5.TIMEFRAME_D1, etc.
         """
         tf_map = {

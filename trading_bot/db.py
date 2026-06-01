@@ -52,6 +52,34 @@ def init():
             created_at TEXT
         )
     """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS kv_store (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    db.commit()
+    db.close()
+
+
+def save_kv(key, value):
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
+               (key, value))
+    db.commit()
+    db.close()
+
+
+def load_kv(key):
+    db = get_db()
+    row = db.execute("SELECT value FROM kv_store WHERE key=?", (key,)).fetchone()
+    db.close()
+    return row["value"] if row else None
+
+
+def delete_kv(key):
+    db = get_db()
+    db.execute("DELETE FROM kv_store WHERE key=?", (key,))
     db.commit()
     db.close()
 
