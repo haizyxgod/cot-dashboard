@@ -447,7 +447,7 @@
                             <span>${instrument.key}</span>
                             <span style="font-size:0.8rem; color:${verdictColors[v.signal] || '#999'}">${v.text || ''}</span>
                         </div>
-                        <div class="sentiment-large">${sent.direction === 'bullish' ? '🟢' : '🔴'}</div>
+                        <div class="sentiment-large">${(v.signal || '').includes('bullish') ? '🟢' : (v.signal || '').includes('bearish') ? '🔴' : '🟡'}</div>
                     </div>
 
                     <div class="stats-grid">
