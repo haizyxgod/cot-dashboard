@@ -896,8 +896,9 @@ if __name__ == "__main__":
     web_server.start_web()
 
     def rapid_pnl_tracker():
-        """Every 15 sec: capture live P&L + detect closed positions."""
+        """Every 15 sec: capture live P&L + detect closed positions + check daily loss."""
         check_be()
+        risk_protection.check_limits(mt5, web_server, _tg)
 
     sched = BackgroundScheduler()
     sched.add_job(scan_all, CronTrigger(hour="*/3", minute=0),
