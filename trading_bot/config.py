@@ -31,6 +31,20 @@ MID_RISK_PCT = 1.0           # 2 variables
 LOW_RISK_PCT = 0.5           # 1 variable (uncertainty)
 SIGNAL_TIMEOUT = 300
 
+# --- Risk Profiles (per-account selectable) ---
+RISK_PROFILES = {
+    "challenge": {  # Fast pass — higher risk
+        3: 2.0, 2: 1.0, 1: 0.5,
+    },
+    "funded": {     # Conservative — protect the account
+        3: 1.5, 2: 1.0, 1: 0.5,
+    },
+    "custom": {     # Same as default, user-adjustable
+        3: 2.0, 2: 1.0, 1: 0.5,
+    },
+}
+MAX_RISK_PER_IDEA_PCT = 3.0  # Cap total risk on one pair (pyramiding)
+
 # --- Entry trigger (H1) ---
 H1_ATR_SURGE_MULT = 1.5   # H1 bar range > 1.5x avg range = volatility trigger
 TRIGGER_MAX_BARS = 24     # Max H1 bars to wait for trigger (24h)

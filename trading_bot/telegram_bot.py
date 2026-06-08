@@ -482,10 +482,17 @@ def poll_once():
         last_update_id = max(last_update_id, update["update_id"])
 
         if "callback_query" in update:
-            handle_callback(update["callback_query"])
+            cb = update["callback_query"]
+            sender_id = str(cb.get("message", {}).get("chat", {}).get("id", ""))
+            if sender_id == str(CHAT_ID):
+                handle_callback(cb)
 
         elif "message" in update:
             msg = update["message"]
+            # Verify sender is authorized
+            sender_id = str(msg.get("chat", {}).get("id", ""))
+            if sender_id != str(CHAT_ID):
+                continue  # silently ignore unknown senders
             text = msg.get("text", "")
             if not text:
                 continue

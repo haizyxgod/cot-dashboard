@@ -8,13 +8,13 @@ from flask_cors import CORS
 import db as database
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["http://127.0.0.1:5002", "http://localhost:5002"])
 
 pending_signals = {}
 database.init()
 
 bot_state = {"last_scan": None, "scan_result": "", "mt5_connected": False, "auto_mode": True,
-             "strategy_mode": "adx_tp"}  # fixed_rr | adx_tp | adx_h1
+             "strategy_mode": "adx_tp", "risk_profile": "challenge"}
 log_entries = []
 
 def add_log(msg):
@@ -128,6 +128,8 @@ def api_stats():
         open_pnl_pct = round(open_pnl / bal * 100, 2) if bal > 0 else 0
         daily_pnl_pct = round(daily_pnl / bal * 100, 2) if bal > 0 else 0
 
+        trading_days = database.count_trading_days()
+
         return jsonify({
             "balance": bal, "equity": acc.get("equity", 0),
             "positions_count": len(positions), "be_count": be_count,
@@ -136,6 +138,7 @@ def api_stats():
             "win_rate": wr, "daily_pnl": daily_pnl, "daily_pnl_pct": daily_pnl_pct,
             "best_trade": best, "worst_trade": worst,
             "dow_pnl": dow_pnl, "monthly_pnl": monthly_pnl,
+            "trading_days": trading_days,
         })
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -249,7 +252,8 @@ def dashboard():
                                   positions=[], history=[], total_pnl=0, count=0,
                                   scan_interval=180, pair_filter="", date_filter="",
                                   auto_mode=bot_state.get("auto_mode", True),
-                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"))
+                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
+                                  risk_profile=bot_state.get("risk_profile", "challenge"))
 
 
 @app.route("/bot/positions")
@@ -269,7 +273,8 @@ def positions_page():
     return render_template('dashboard.html', positions=positions, total_pnl=total_pnl,
                                   count=count, tab="positions", state=bot_state,
                                   history=[], pair_filter="", date_filter="",
-                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"))
+                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
+                                  risk_profile=bot_state.get("risk_profile", "challenge"))
 
 
 @app.route("/api/stats/detailed")
@@ -352,7 +357,8 @@ def stats_page():
     return render_template('dashboard.html', tab="stats", state=bot_state,
                                   positions=[], history=[], total_pnl=0, count=0,
                                   scan_interval=180, pair_filter="", date_filter="",
-                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"))
+                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
+                                  risk_profile=bot_state.get("risk_profile", "challenge"))
 
 
 @app.route("/bot/history")
@@ -369,7 +375,8 @@ def history_page():
     hist = hist[:100]
     return render_template('dashboard.html', history=hist, tab="history", state=bot_state,
                                   pair_filter=pair_filter, date_filter=date_filter,
-                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"))
+                                  strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
+                                  risk_profile=bot_state.get("risk_profile", "challenge"))
 
 
 @app.route("/bot/close/<int:ticket>", methods=["POST"])
@@ -543,6 +550,19 @@ def set_strategy():
     return {"ok": True, "strategy_mode": mode, "msg": f"Strategy: {labels[mode]}"}
 
 
+@app.route("/bot/risk_profile", methods=["POST"])
+def set_risk_profile():
+    """Change risk profile: challenge | funded | custom."""
+    profile = (request.get_json(silent=True) or {}).get("profile", "challenge")
+    if profile not in ("challenge", "funded", "custom"):
+        return {"ok": False, "msg": f"Unknown profile: {profile}"}
+    old = bot_state.get("risk_profile", "challenge")
+    bot_state["risk_profile"] = profile
+    labels = {"challenge": "Challenge", "funded": "Funded", "custom": "Custom"}
+    add_log(f"Risk: {labels.get(old, old)} -> <b>{labels.get(profile, profile)}</b>")
+    return {"ok": True, "risk_profile": profile, "msg": f"Risk: {labels[profile]}"}
+
+
 @app.route("/bot/resume", methods=["POST"])
 def resume_bot():
     """Resume bot after total DD pause."""
@@ -583,7 +603,7 @@ def reject(sig_id):
 
 
 def run_web(port=5002):
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
 
 def start_web():
     t = threading.Thread(target=run_web, daemon=True)

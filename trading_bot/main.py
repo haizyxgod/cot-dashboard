@@ -306,7 +306,7 @@ def symbol_to_pair(symbol):
     return symbol
 
 
-def register_be(ticket, symbol, entry_price, direction, sl=0, tp=0):
+def register_be(ticket, symbol, entry_price, direction, sl=0, tp=0, risk_pct=0):
     """Register a new position for BE tracking."""
     be_tracked[ticket] = {
         "symbol": symbol,
@@ -315,6 +315,7 @@ def register_be(ticket, symbol, entry_price, direction, sl=0, tp=0):
         "sl": sl,
         "tp": tp,
         "be_triggered": False,
+        "risk_pct": risk_pct,
     }
     database.save_be_state(be_tracked)
     print(f"[BE] Tracking pos #{ticket} {symbol} {direction} entry={entry_price}")
@@ -488,8 +489,16 @@ def scan_all(is_manual=False):
                 continue
 
             balance = float(acc.get("balance", 0))
+
+            # Apply risk profile override
+            risk_profile = web_server.bot_state.get("risk_profile", "challenge")
+            profile = config.RISK_PROFILES.get(risk_profile, config.RISK_PROFILES["challenge"])
+            score = signal.get("score", 2)
+            base_risk = signal["risk_pct"]
+            risk_pct = profile.get(score, base_risk)  # use profile override or signal default
+
             pos = calculate_lot(
-                balance, entry, sl, signal["risk_pct"],
+                balance, entry, sl, risk_pct,
                 pair_name, info["point"], info["trade_contract_size"],
                 info["trade_tick_value"]
             )
@@ -541,6 +550,17 @@ def scan_all(is_manual=False):
             tp_price = round(tp_price, 5 if "JPY" in symbol else 2)
             print(f"  ADX={adx:.1f if adx else '?'} regime={regime} "
                   f"SL={sl:.5f} TP={tp_price:.5f}")
+
+            # --- Max risk per idea check (pyramiding cap) ---
+            current_risk = sum(
+                be_tracked.get(p["ticket"], {}).get("risk_pct", 0)
+                for p in open_positions if p["symbol"] == symbol
+            )
+            max_idea_risk = getattr(config, 'MAX_RISK_PER_IDEA_PCT', 3.0)
+            if current_risk + risk_pct > max_idea_risk:
+                risk_pct = max(0.25, max_idea_risk - current_risk)
+                print(f"  Risk capped: {current_risk:.1f}% existing + new -> {risk_pct:.1f}% "
+                      f"(max {max_idea_risk}%)")
 
             # --- Entry: immediate (adx_tp) or H1 trigger (adx_h1) ---
             if strategy_mode == "adx_tp":
@@ -623,7 +643,9 @@ def _execute_trade(symbol, pair_name, direction, entry, sl_price, tp_price,
     if position_id is None:
         position_id = order_id
 
-    register_be(position_id, symbol, entry, direction, sl=sl_price, tp=tp_price)
+    register_be(position_id, symbol, entry, direction, sl=sl_price, tp=tp_price, risk_pct=risk_pct)
+
+    database.mark_trading_day()
 
     sid = database.save_signal({
         "pair": pair_name, "direction": direction,
@@ -750,8 +772,15 @@ def check_pending_triggers():
             # Recalculate TP from ACTUAL entry + SL with stored regime
             is_forex = "JPY" in pair_name or "GBP" in pair_name
             rr = config.RISK_RR_FOREX if is_forex else config.RISK_RR
+
+            # Apply risk profile override
+            risk_profile = web_server.bot_state.get("risk_profile", "challenge")
+            profile = config.RISK_PROFILES.get(risk_profile, config.RISK_PROFILES["challenge"])
+            score = ps.get("score", 2)
+            risk_pct = profile.get(score, ps["risk_pct"])
+
             pos = calculate_lot(
-                balance, entry, sl, ps["risk_pct"],
+                balance, entry, sl, risk_pct,
                 pair_name, info["point"], info["trade_contract_size"],
                 info["trade_tick_value"], rr=rr
             )

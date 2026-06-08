@@ -58,6 +58,12 @@ def init():
             value TEXT
         )
     """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS trading_days (
+            date TEXT PRIMARY KEY,
+            trades INTEGER DEFAULT 1
+        )
+    """)
     db.commit()
     db.close()
 
@@ -184,4 +190,23 @@ def clear_be_ticket(ticket):
     db = get_db()
     db.execute("DELETE FROM be_state WHERE ticket=?", (ticket,))
     db.commit()
+    db.close()
+
+
+def mark_trading_day():
+    """Mark today as a trading day (a trade was executed)."""
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    db = get_db()
+    db.execute("INSERT OR IGNORE INTO trading_days (date) VALUES (?)", (today,))
+    db.commit()
+    db.close()
+
+
+def count_trading_days():
+    """Return number of unique trading days."""
+    db = get_db()
+    row = db.execute("SELECT COUNT(*) as cnt FROM trading_days").fetchone()
+    db.close()
+    return row["cnt"] if row else 0
     db.close()

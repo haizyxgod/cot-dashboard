@@ -106,6 +106,13 @@
                 <option value="adx_tp" {{ 'selected' if strategy_mode == 'adx_tp' else '' }}>ADX TP</option>
                 <option value="adx_h1" {{ 'selected' if strategy_mode == 'adx_h1' else '' }}>ADX + H1</option>
             </select>
+            <select id="risk-select" onchange="setRiskProfile(this.value)"
+                    style="font-size:0.65rem;padding:2px 6px;margin-left:4px;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border)"
+                    title="Риск-профиль">
+                <option value="challenge" {{ 'selected' if risk_profile == 'challenge' else '' }}>Challenge</option>
+                <option value="funded" {{ 'selected' if risk_profile == 'funded' else '' }}>Funded</option>
+                <option value="custom" {{ 'selected' if risk_profile == 'custom' else '' }}>Custom</option>
+            </select>
         </span>
     </div>
     <div style="display:flex;align-items:center;gap:12px">
@@ -375,6 +382,19 @@ async function setStrategy(mode){
             document.getElementById('strategy-select').value = 'adx_tp';
         }
     }catch(e){showToast('Ошибка','Не удалось сменить стратегию','err')}
+}
+async function setRiskProfile(profile){
+    try{
+        var r=await fetch('/bot/risk_profile',{method:'POST',
+            headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+            body:JSON.stringify({profile:profile})});
+        var d=await r.json();
+        if(d.ok){
+            document.getElementById('risk-select').value = d.risk_profile;
+            showToast('Риск',d.msg,'ok');
+            if(isDashboard) refresh();
+        }else{showToast('Ошибка',d.msg,'err')}
+    }catch(e){showToast('Ошибка','Не удалось сменить профиль','err')}
 }
 
 var refreshCount=0;
