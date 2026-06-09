@@ -51,6 +51,13 @@ def check_limits(mt5, web_server, _tg):
     except Exception:
         return True, "no_mt5"
 
+    # Safety: if MT5 returns 0 (disconnected/broken), skip — never trigger limits
+    if balance <= 0 or equity <= 0:
+        return True, "no_mt5"
+    # Guard against absurd balance change (stale/corrupt account data)
+    if day_start_balance > 0 and abs(balance - day_start_balance) > day_start_balance * 0.5:
+        return True, "no_mt5"
+
     # Init on first run
     if day_start_balance == 0:
         day_start_balance = balance

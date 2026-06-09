@@ -50,6 +50,7 @@ last_signal_sent = {}
 
 # BE tracking: ticket -> {entry_price, symbol, direction, be_triggered}
 be_tracked = {}
+_be_lock = threading.Lock()
 
 # Pending signals waiting for H1 trigger
 # Each: {pair_name, symbol, direction, entry_h4, sl, tp_price, risk_pct,
@@ -189,13 +190,15 @@ def check_be():
     for p in positions:
         ticket = p["ticket"]
         if ticket in be_tracked:
-            be_tracked[ticket]["last_profit"] = p.get("profit", 0)
+            with _be_lock:
+                be_tracked[ticket]["last_profit"] = p.get("profit", 0)
 
     for ticket, info in list(be_tracked.items()):
         if ticket not in pos_by_ticket:
             # Position closed — use last known live profit
             _log_closed_trade(ticket, info)
-            be_tracked.pop(ticket, None)
+            with _be_lock:
+                be_tracked.pop(ticket, None)
             database.clear_be_ticket(ticket)
             continue
 
@@ -308,15 +311,16 @@ def symbol_to_pair(symbol):
 
 def register_be(ticket, symbol, entry_price, direction, sl=0, tp=0, risk_pct=0):
     """Register a new position for BE tracking."""
-    be_tracked[ticket] = {
-        "symbol": symbol,
-        "entry_price": entry_price,
-        "direction": direction,
-        "sl": sl,
-        "tp": tp,
-        "be_triggered": False,
-        "risk_pct": risk_pct,
-    }
+    with _be_lock:
+        be_tracked[ticket] = {
+            "symbol": symbol,
+            "entry_price": entry_price,
+            "direction": direction,
+            "sl": sl,
+            "tp": tp,
+            "be_triggered": False,
+            "risk_pct": risk_pct,
+        }
     database.save_be_state(be_tracked)
     print(f"[BE] Tracking pos #{ticket} {symbol} {direction} entry={entry_price}")
 
@@ -403,7 +407,8 @@ def scan_all(is_manual=False):
             return False
         for p in symbol_positions:
             ticket = p["ticket"]
-            info = be_tracked.get(ticket, {})
+            with _be_lock:
+                info = be_tracked.get(ticket, {})
             if not info.get("be_triggered"):
                 return False  # at least one position without BE
         return True  # all positions at BE — safe to add
@@ -633,7 +638,8 @@ def _execute_trade(symbol, pair_name, direction, entry, sl_price, tp_price,
     position_id = None
     open_pos = mt5.get_positions()
     for p in open_pos:
-        if p["symbol"] == symbol and abs(p["price_open"] - entry) < entry * 0.005:
+        price_open = p.get("price_open", p.get("open_price", 0))
+        if p["symbol"] == symbol and abs(price_open - entry) < entry * 0.005:
             position_id = p["ticket"]
             break
     if position_id is None:
@@ -903,8 +909,7 @@ if __name__ == "__main__":
     sched = BackgroundScheduler()
     sched.add_job(scan_all, CronTrigger(hour="*/3", minute=0),
                   id="scan")
-    sched.add_job(check_be, "interval", seconds=config.TRIGGER_SCAN_SEC,
-                  id="be_monitor")
+    # check_be is called by rapid_pnl_tracker every 15s — no separate job needed
     sched.add_job(check_pending_triggers, "interval", seconds=config.TRIGGER_SCAN_SEC,
                   id="h1_trigger_monitor")
     sched.add_job(rapid_pnl_tracker, "interval", seconds=15,
