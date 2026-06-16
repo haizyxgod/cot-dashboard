@@ -100,19 +100,6 @@
                     <span style="display:inline-block;width:12px;height:12px;background:#fff;border-radius:50%;position:absolute;top:2px;right:2px;transition:all 0.2s"></span>
                 </span>
             </label>
-            <select id="strategy-select" onchange="setStrategy(this.value)"
-                    style="font-size:0.65rem;padding:2px 6px;margin-left:8px;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border)"
-                    title="Торговая стратегия">
-                <option value="adx_tp" {{ 'selected' if strategy_mode == 'adx_tp' else '' }}>ADX TP</option>
-                <option value="adx_h1" {{ 'selected' if strategy_mode == 'adx_h1' else '' }}>ADX + H1</option>
-            </select>
-            <select id="risk-select" onchange="setRiskProfile(this.value)"
-                    style="font-size:0.65rem;padding:2px 6px;margin-left:4px;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border)"
-                    title="Риск-профиль">
-                <option value="challenge" {{ 'selected' if risk_profile == 'challenge' else '' }}>Challenge</option>
-                <option value="funded" {{ 'selected' if risk_profile == 'funded' else '' }}>Funded</option>
-                <option value="custom" {{ 'selected' if risk_profile == 'custom' else '' }}>Custom</option>
-            </select>
         </span>
     </div>
     <div style="display:flex;align-items:center;gap:12px">
@@ -143,18 +130,37 @@
 <div class="section-title">Equity Curve <span style="font-weight:400;color:var(--muted);font-size:0.7rem" id="eq-stats"></span></div>
 <canvas id="equity-chart" height="220" style="width:100%;background:var(--bg2);border-radius:10px;border:1px solid var(--border);margin-bottom:16px"></canvas>
 
-<div class="section-title">P&amp;L по месяцам</div>
-<div style="overflow-x:auto">
-<table class="monthly-table" id="monthly-table"><tbody><tr><td colspan="13">Загрузка...</td></tr></tbody></table>
-</div>
-
-<div class="section-title">P&amp;L по дням недели</div>
-<div style="display:flex;gap:4px;margin-bottom:12px" id="dow-heatmap">
-    <div class="dow-bar"><div class="label">Пн</div><div class="bar"></div><div class="val">--</div></div>
-    <div class="dow-bar"><div class="label">Вт</div><div class="bar"></div><div class="val">--</div></div>
-    <div class="dow-bar"><div class="label">Ср</div><div class="bar"></div><div class="val">--</div></div>
-    <div class="dow-bar"><div class="label">Чт</div><div class="bar"></div><div class="val">--</div></div>
-    <div class="dow-bar"><div class="label">Пт</div><div class="bar"></div><div class="val">--</div></div>
+<div class="section-title">Аккаунт</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:16px" id="account-panel">
+    <div class="card">
+        <div class="label">Сервер / Логин</div>
+        <div class="value" style="font-size:0.85rem" id="acc-server">--</div>
+    </div>
+    <div class="card">
+        <div class="label">Баланс / Equity</div>
+        <div class="value" style="font-size:0.85rem" id="acc-balance">--</div>
+    </div>
+    <div class="card">
+        <div class="label">Торговых дней</div>
+        <div class="value" style="font-size:0.85rem;color:var(--head)" id="acc-tdays">--</div>
+    </div>
+    <div class="card">
+        <div class="label">Стратегия</div>
+        <select id="strategy-select" onchange="setStrategy(this.value)"
+                style="font-size:0.75rem;padding:3px 6px;margin-top:4px;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border);width:100%">
+            <option value="adx_tp">ADX TP</option>
+            <option value="adx_h1">ADX + H1</option>
+        </select>
+    </div>
+    <div class="card">
+        <div class="label">Риск-профиль</div>
+        <select id="risk-select" onchange="setRiskProfile(this.value)"
+                style="font-size:0.75rem;padding:3px 6px;margin-top:4px;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border);width:100%">
+            <option value="challenge">Challenge</option>
+            <option value="funded">Funded</option>
+            <option value="custom">Custom</option>
+        </select>
+    </div>
 </div>
 
 <div class="section-title">Открытые позиции <span style="font-weight:400;color:var(--muted)" id="pos-time"></span></div>
@@ -267,7 +273,29 @@ async function loadStats(){
     }
 }
 loadStats();
+async function loadPeriodStats(){
+    try{
+        var s=await fetch('/api/stats').then(r=>r.json());
+        if(s.monthly_pnl) buildMonthlyTable(s.monthly_pnl);
+        if(s.dow_pnl) buildDowHeatmap(s.dow_pnl);
+    }catch(e){}
+}
+loadPeriodStats();
 </script>
+
+<div class="section-title" style="margin-top:24px">P&amp;L по месяцам</div>
+<div style="overflow-x:auto">
+<table class="monthly-table" id="monthly-table"><tbody><tr><td colspan="13">Загрузка...</td></tr></tbody></table>
+</div>
+
+<div class="section-title">P&amp;L по дням недели</div>
+<div style="display:flex;gap:4px;margin-bottom:12px" id="dow-heatmap">
+    <div class="dow-bar"><div class="label">Пн</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Вт</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Ср</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Чт</div><div class="bar"></div><div class="val">--</div></div>
+    <div class="dow-bar"><div class="label">Пт</div><div class="bar"></div><div class="val">--</div></div>
+</div>
 
 {% endif %}
 
@@ -423,6 +451,20 @@ function buildMonthlyTable(months){
     html+='</tbody>';
     t.innerHTML=html;
 }
+function buildDowHeatmap(dow){
+    var days=['Пн','Вт','Ср','Чт','Пт'];
+    var maxAbs=1;
+    days.forEach(function(d){maxAbs=Math.max(maxAbs,Math.abs(dow[d]||0))});
+    days.forEach(function(d,i){
+        var v=dow[d]||0, pct=Math.min(Math.abs(v)/maxAbs*100,100);
+        var bar=document.querySelectorAll('#dow-heatmap .dow-bar')[i];
+        if(!bar)return;
+        bar.querySelector('.val').textContent='$'+(v>=0?'+':'')+v.toFixed(0);
+        var b=bar.querySelector('.bar');
+        b.style.height=(pct||4)+'px';
+        b.className='bar '+(v>0?'bar-pos':v<0?'bar-neg':'bar-zero');
+    });
+}
 
 async function refresh(){
     refreshCount++;
@@ -465,22 +507,17 @@ async function refresh(){
     document.getElementById('best-trade').textContent='$'+(s.best_trade||0).toFixed(0);
     document.getElementById('worst-trade').textContent='$'+(s.worst_trade||0).toFixed(0);
 
+    // Account panel
+    var accServer=document.getElementById('acc-server');
+    if(accServer) accServer.textContent='OANDA | $'+s.balance.toFixed(0);
+    var accTd=document.getElementById('acc-tdays');
+    if(accTd) accTd.textContent=(s.trading_days||0)+' дн.';
+
     // Monthly P&L
     if(s.monthly_pnl) buildMonthlyTable(s.monthly_pnl);
 
     // DOW heatmap
-    var dow=s.dow_pnl||{}, days=['Пн','Вт','Ср','Чт','Пт'];
-    var maxAbs=1;
-    days.forEach(function(d){maxAbs=Math.max(maxAbs,Math.abs(dow[d]||0))});
-    days.forEach(function(d,i){
-        var v=dow[d]||0, pct=Math.min(Math.abs(v)/maxAbs*100,100);
-        var bar=document.querySelectorAll('#dow-heatmap .dow-bar')[i];
-        if(!bar)return;
-        bar.querySelector('.val').textContent='$'+(v>=0?'+':'')+v.toFixed(0);
-        var b=bar.querySelector('.bar');
-        b.style.height=(pct||4)+'px';
-        b.className='bar '+(v>0?'bar-pos':v<0?'bar-neg':'bar-zero');
-    });
+    if(s.dow_pnl) buildDowHeatmap(s.dow_pnl);
 
     // Positions
     document.getElementById('pos-time').textContent='(live)';
