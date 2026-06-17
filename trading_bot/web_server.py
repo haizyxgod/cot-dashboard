@@ -248,12 +248,14 @@ def export_csv():
 
 @app.route("/bot")
 def dashboard():
+    import config as _cfg
     return render_template('dashboard.html', state=bot_state, tab="dashboard",
                                   positions=[], history=[], total_pnl=0, count=0,
                                   scan_interval=180, pair_filter="", date_filter="",
                                   auto_mode=bot_state.get("auto_mode", True),
                                   strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
-                                  risk_profile=bot_state.get("risk_profile", "challenge"))
+                                  risk_profile=bot_state.get("risk_profile", "challenge"),
+                                  account_login=_cfg.MT5_LOGIN)
 
 
 @app.route("/bot/positions")
@@ -270,11 +272,13 @@ def positions_page():
         total_pnl = summary["total_pnl"]; count = summary["count"]
     except Exception:
         positions = []; total_pnl = 0; count = 0
+    import config as _cfg2
     return render_template('dashboard.html', positions=positions, total_pnl=total_pnl,
                                   count=count, tab="positions", state=bot_state,
                                   history=[], pair_filter="", date_filter="",
                                   strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
-                                  risk_profile=bot_state.get("risk_profile", "challenge"))
+                                  risk_profile=bot_state.get("risk_profile", "challenge"),
+                                  account_login=_cfg2.MT5_LOGIN)
 
 
 @app.route("/api/stats/detailed")
@@ -354,9 +358,11 @@ def api_stats_detailed():
 
 @app.route("/bot/stats")
 def stats_page():
+    import config as _cfg3
     return render_template('dashboard.html', tab="stats", state=bot_state,
                                   positions=[], history=[], total_pnl=0, count=0,
                                   scan_interval=180, pair_filter="", date_filter="",
+                                  account_login=_cfg3.MT5_LOGIN,
                                   strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
                                   risk_profile=bot_state.get("risk_profile", "challenge"))
 
@@ -373,8 +379,10 @@ def history_page():
     if date_filter:
         hist = [h for h in hist if (h.get("time", "") or "").startswith(date_filter)]
     hist = hist[:100]
+    import config as _cfg4
     return render_template('dashboard.html', history=hist, tab="history", state=bot_state,
                                   pair_filter=pair_filter, date_filter=date_filter,
+                                  account_login=_cfg4.MT5_LOGIN,
                                   strategy_mode=bot_state.get("strategy_mode", "adx_tp"),
                                   risk_profile=bot_state.get("risk_profile", "challenge"))
 

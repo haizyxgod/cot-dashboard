@@ -1,4 +1,4 @@
-"""COT + FVG Trading Bot v5 — ADX Adaptive TP + H1 Trigger.
+"""COT + FVG Trading Bot v6.1 — ADX Adaptive TP + H1 Trigger | FTMO $50k.
 
 Цепочка:
   1. FVG(D1+H4) задаёт направление
@@ -876,8 +876,12 @@ def _send_healthcheck():
         dstop = " [DAILY STOP]" if risk_protection.daily_stopped else ""
         pstop = " [PAUSED]" if risk_protection.bot_paused else ""
         pending_line = f"Ожидают H1: *{pending_n}* сигн.\n" if pending_n else ""
+        strategy_label = "ADX+H1" if web_server.bot_state.get("strategy_mode") == "adx_h1" else "ADX TP"
+        acc_info = f"Счёт: *{config.MT5_LOGIN}* ({config.MT5_SERVER}) | v6.1\n"
         _tg(
             f"🤖 *Бот жив*{dstop}{pstop} | {datetime.now().strftime('%H:%M')}\n"
+            f"{acc_info}"
+            f"Стратегия: *{strategy_label}* | "
             f"Баланс: *${balance:,.0f}* | Equity: *${equity:,.0f}*\n"
             f"Открыто: *{open_count}* поз. | P&L: *${open_pnl:+,.0f}*\n"
             f"{dd_line}"
@@ -893,8 +897,8 @@ sched = None  # module-level for web resume access
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("COT + FVG Bot v5 — ADX Adaptive TP + H1 Trigger")
-    print(f"Server: {config.MT5_SERVER}")
+    print("COT + FVG Bot v6.1 — ADX Adaptive TP + H1 Trigger | FTMO $50k")
+    print(f"Account: {config.MT5_LOGIN} | Server: {config.MT5_SERVER}")
     print(f"Pairs: {list(config.PAIRS.keys())}")
     print(f"UI: http://localhost:5002/bot (monitoring)")
     print("=" * 50)
@@ -933,7 +937,10 @@ if __name__ == "__main__":
     def _send_startup_msg():
         try:
             from telegram_bot import send_text
-            send_text("🤖 *Бот запущен* (v5.1) — клавиатура активна.")
+            send_text("🤖 *Бот запущен* v6.1\n"
+                     f"Счёт: {config.MT5_LOGIN} ({config.MT5_SERVER})\n"
+                     f"Пары: {', '.join(config.PAIRS.keys())}\n"
+                     "Клавиатура активна.")
         except Exception as e:
             print(f"[TG] Startup message failed: {e}")
     threading.Thread(target=_send_startup_msg, daemon=True).start()

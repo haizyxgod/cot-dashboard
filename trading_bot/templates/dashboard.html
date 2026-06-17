@@ -87,10 +87,11 @@
 
 <div class="header">
     <div>
-        <h1>FIN Trading Bot</h1>
+        <h1>FIN Trading Bot <span style="font-size:0.65rem;color:var(--muted);font-weight:400">v6.1</span></h1>
         <span style="font-size:0.7rem;color:var(--muted)">
             <span class="status-dot {{ 'online' if state.mt5_connected else 'offline' }}"></span>
             {{ 'MT5 Online' if state.mt5_connected else 'MT5 Offline' }}
+            &nbsp;|&nbsp; Счёт: <b>{{ account_login }}</b>
             &nbsp;|&nbsp; Скан: <b id="next-scan">--</b>
             <button id="btn-scan" class="btn btn-ok" onclick="manualScan()" style="font-size:0.65rem;padding:3px 10px;margin-left:8px" title="Запустить сканирование">▶ Скан</button>
             <label class="mode-toggle" title="Авто / Ручной" style="margin-left:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px">
@@ -148,17 +149,17 @@
         <div class="label">Стратегия</div>
         <select id="strategy-select" onchange="setStrategy(this.value)"
                 style="font-size:0.75rem;padding:3px 6px;margin-top:4px;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border);width:100%">
-            <option value="adx_tp">ADX TP</option>
-            <option value="adx_h1">ADX + H1</option>
+            <option value="adx_tp" {{ 'selected' if strategy_mode == 'adx_tp' else '' }}>ADX TP</option>
+            <option value="adx_h1" {{ 'selected' if strategy_mode == 'adx_h1' else '' }}>ADX + H1</option>
         </select>
     </div>
     <div class="card">
         <div class="label">Риск-профиль</div>
         <select id="risk-select" onchange="setRiskProfile(this.value)"
                 style="font-size:0.75rem;padding:3px 6px;margin-top:4px;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border);width:100%">
-            <option value="challenge">Challenge</option>
-            <option value="funded">Funded</option>
-            <option value="custom">Custom</option>
+            <option value="challenge" {{ 'selected' if risk_profile == 'challenge' else '' }}>Challenge</option>
+            <option value="funded" {{ 'selected' if risk_profile == 'funded' else '' }}>Funded</option>
+            <option value="custom" {{ 'selected' if risk_profile == 'custom' else '' }}>Custom</option>
         </select>
     </div>
 </div>
