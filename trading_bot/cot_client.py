@@ -37,13 +37,7 @@ def get_verdict(pair_name):
         signal = v.get("signal", "neutral")
         direction = analysis.get("sentiment", {}).get("direction", "neutral")
 
-        # JPY COT inversion: COT tracks JPY futures -> flip direction
-        if "JPY" in pair_name:
-            inv = {"bullish": "bearish", "bearish": "bullish",
-                   "strong_bullish": "strong_bearish",
-                   "strong_bearish": "strong_bullish"}
-            signal = inv.get(signal, signal)
-            direction = inv.get(direction, direction)
+        # JPY inversion now handled by cot_fetcher.advanced_analysis()
 
         return {
             "signal": signal,

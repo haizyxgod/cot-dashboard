@@ -301,6 +301,44 @@ class COTDataFetcher:
         # 5. Итоговый вердикт
         analysis['verdict'] = self._compute_verdict(analysis)
 
+        # 6. JPY inversion: COT tracks JPY futures → flip for USD/JPY trading
+        if 'JPY' in instrument_name:
+            inv = {'bullish': 'bearish', 'bearish': 'bullish',
+                   'strong_bullish': 'strong_bearish', 'strong_bearish': 'strong_bullish'}
+            inv_text = {'Бычий 🟢': 'Медвежий 🔴', 'Медвежий 🔴': 'Бычий 🟢',
+                        'Бычий': 'Медвежий', 'Медвежий': 'Бычий'}
+            # Sentiment
+            s = analysis.get('sentiment', {})
+            if s.get('direction'):
+                s['direction'] = inv.get(s['direction'], s['direction'])
+                s['text'] = inv_text.get(s['text'], s['text'])
+            # Verdict
+            v = analysis.get('verdict', {})
+            if v.get('signal'):
+                v['signal'] = inv.get(v['signal'], v['signal'])
+                v['score'] = -v.get('score', 0)
+                # Fix verdict text
+                txt = v.get('text', '')
+                txt = txt.replace('бычий', '%%TEMP%%').replace('медвежий', 'бычий').replace('%%TEMP%%', 'медвежий')
+                txt = txt.replace('Бычий', '%%TEMP%%').replace('Медвежий', 'Бычий').replace('%%TEMP%%', 'Медвежий')
+                v['text'] = txt
+            # Trend direction
+            trend = analysis.get('trend') or {}
+            if trend.get('direction') in ('up', 'down'):
+                trend['direction'] = 'down' if trend['direction'] == 'up' else 'up'
+            # Trader divergence
+            trader = analysis.get('trader_divergence') or {}
+            if trader.get('signal') == 'bullish_divergence':
+                trader['signal'] = 'bearish_divergence'
+            elif trader.get('signal') == 'bearish_divergence':
+                trader['signal'] = 'bullish_divergence'
+            # Price divergence
+            price_div = analysis.get('price_divergence') or {}
+            if price_div.get('signal') == 'bullish_divergence':
+                price_div['signal'] = 'bearish_divergence'
+            elif price_div.get('signal') == 'bearish_divergence':
+                price_div['signal'] = 'bullish_divergence'
+
         return analysis
 
     def _compute_verdict(self, analysis):
